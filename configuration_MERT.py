@@ -47,6 +47,7 @@ class MERTConfig(PretrainedConfig):
         conv_stride=(5, 2, 2, 2, 2, 2, 2),
         conv_kernel=(10, 3, 3, 3, 3, 2, 2),
         conv_bias=False,
+        conv_pos_batch_norm=False,
         num_conv_pos_embeddings=128,
         num_conv_pos_embedding_groups=16,
         do_stable_layer_norm=False,
@@ -78,6 +79,7 @@ class MERTConfig(PretrainedConfig):
         self.conv_stride = list(conv_stride)
         self.conv_kernel = list(conv_kernel)
         self.conv_bias = conv_bias
+        self.conv_pos_batch_norm = conv_pos_batch_norm
         self.num_conv_pos_embeddings = num_conv_pos_embeddings
         self.num_conv_pos_embedding_groups = num_conv_pos_embedding_groups
         self.num_feat_extract_layers = len(self.conv_dim)

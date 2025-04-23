@@ -10,7 +10,7 @@ from transformers.modeling_outputs import BaseModelOutput
 import torch
 from torch import nn
 
-from transformers.models.hubert.modeling_hubert import (
+from modeling_hubert import (
     HubertFeatureEncoder,
     HubertModel,
     HubertEncoderStableLayerNorm,
@@ -28,7 +28,7 @@ except:
     print("WARNING: feature_extractor_cqt requires the libray 'nnAudio'")
     NNAUDIO_INSTALLED=False
 
-from .configuration_MERT import MERTConfig
+from configuration_MERT import MERTConfig
 
 class MERTFeatureProjection(nn.Module):
     def __init__(self, config):
@@ -99,7 +99,14 @@ class MERTModel(HubertModel):
         # Initialize weights and apply final processing
         self.post_init()
     
-    def forward(self, input_values: Optional[torch.Tensor], attention_mask: Optional[torch.Tensor] = None, mask_time_indices: Optional[torch.FloatTensor] = None, output_attentions: Optional[bool] = None, output_hidden_states: Optional[bool] = None, return_dict: Optional[bool] = None) -> Union[Tuple, BaseModelOutput]:
+    def forward(self,
+                input_values: Optional[torch.Tensor],
+                attention_mask: Optional[torch.Tensor] = None,
+                mask_time_indices: Optional[torch.FloatTensor] = None,
+                output_attentions: Optional[bool] = None,
+                output_hidden_states: Optional[bool] = None,
+                return_dict: Optional[bool] = None
+                ) -> Union[Tuple, BaseModelOutput]:
         
         # return super().forward(input_values, attention_mask, mask_time_indices, output_attentions, output_hidden_states, return_dict)
         
