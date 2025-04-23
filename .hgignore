@@ -1,0 +1,6 @@
+syntax: glob
+pytorch_model.bin
+*.wav
+__pycache__
+*~
+*.rej

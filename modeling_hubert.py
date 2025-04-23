@@ -36,7 +36,7 @@ from transformers.utils import (
     logging,
     replace_return_docstrings,
 )
-from local_hubert_config import HubertConfig
+from configuration_hubert import HubertConfig
 
 
 if is_flash_attn_2_available():
