@@ -16,6 +16,14 @@ dict=torch.load('pytorch_model.bin')
 model.load_state_dict(dict)
 summary(model)
 
+torch.save(model.state_dict(), 'for_libtorch.pth')
+
+w = { k : v for k, v in model.state_dict().items() }
+torch.save(w, 'fart.pth')
+
+print('keys are:')
+print(model.state_dict().keys())
+
 model.eval()
 
 print(model)
