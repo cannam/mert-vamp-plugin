@@ -253,9 +253,13 @@ class HubertGroupNormConvLayer(nn.Module):
         self.layer_norm = nn.GroupNorm(num_groups=self.out_conv_dim, num_channels=self.out_conv_dim, affine=True)
 
     def forward(self, hidden_states):
+        print(f"HubertGroupNormConvLayer: input shape = {hidden_states.shape}")
         hidden_states = self.conv(hidden_states)
+        print(f"HubertGroupNormConvLayer: after conv = {hidden_states.shape}")
         hidden_states = self.layer_norm(hidden_states)
+        print(f"HubertGroupNormConvLayer: after layer_norm = {hidden_states.shape}")
         hidden_states = self.activation(hidden_states)
+        print(f"HubertGroupNormConvLayer: after activation = {hidden_states.shape}")
         return hidden_states
 
 

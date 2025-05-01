@@ -16,10 +16,8 @@ dict=torch.load('pytorch_model.bin')
 model.load_state_dict(dict)
 summary(model)
 
-torch.save(model.state_dict(), 'for_libtorch.pth')
-
 w = { k : v for k, v in model.state_dict().items() }
-torch.save(w, 'fart.pth')
+torch.save(w, 'for_libtorch.pth')
 
 print('keys are:')
 print(model.state_dict().keys())
@@ -31,7 +29,7 @@ print(model)
 #scripted_model = torch.jit.script(model)
 #scripted_model.save("scripted_model.pt")
 
-audio, file_rate = librosa.load('stairway-intro.wav', sr = 16000, mono = True)
+audio, file_rate = librosa.load('stairway-intro-16k-mono.wav', sr = 16000, mono = True)
 t_audio = torch.from_numpy(np.array([audio]))
 
 with torch.no_grad():
@@ -42,7 +40,11 @@ print(all_layer_hidden_states.shape) # [13 layer, Time steps, 768 feature_dim]
 
 import pandas as pd
 
+l0_np = all_layer_hidden_states[0].numpy()
+df = pd.DataFrame(l0_np)
+df.to_csv("out_0.csv", index=False)
+
 l12_np = all_layer_hidden_states[12].numpy()
 df = pd.DataFrame(l12_np)
-df.to_csv("out.csv", index=False)
+df.to_csv("out_12.csv", index=False)
 

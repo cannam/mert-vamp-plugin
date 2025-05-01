@@ -1,6 +1,7 @@
 
 //#include <torch/data.h>
 //#include <torch/enum.h>
+
 #include <torch/nn.h>
 #include <torch/serialize.h>
 //#include <torch/types.h>
@@ -10,6 +11,8 @@
 
 #include <iostream>
 #include <fstream>
+
+#include <sndfile.h>
 
 using namespace std;
 using namespace torch;
@@ -40,7 +43,11 @@ struct HubertNoLayerNormConvLayerImpl : nn::Module {
     }
     
     Tensor forward(Tensor x) {
-        return gelu(conv(x));
+        cerr << "HubertNoLayerNormConvLayer: input shape = " << x.sizes() << endl;
+        x = conv(x);
+        cerr << "HubertNoLayerNormConvLayer: after conv = " << x.sizes() << endl;
+        x = gelu(x);
+        return x;
     }
 };
 
@@ -66,9 +73,13 @@ struct HubertGroupNormConvLayerImpl : nn::Module {
     }
     
     Tensor forward(Tensor x) {
+        cerr << "HubertGroupNormConvLayer: input shape = " << x.sizes() << endl;
         x = conv(x);
+        cerr << "HubertGroupNormConvLayer: after conv = " << x.sizes() << endl;
         x = layer_norm(x);
-        return gelu(x);
+        cerr << "HubertGroupNormConvLayer: after norm = " << x.sizes() << endl;
+        x = gelu(x);
+        return x;
     }
 };
 
@@ -90,29 +101,69 @@ struct HubertFeatureEncoderImpl : nn::Module {
     }
 
     Tensor forward(Tensor x) {
+        cerr << "HubertFeatureEncoder: input shape = " << x.sizes() << endl;
         for (int i = 0; i < layers->size(); ++i) {
             if (auto layer = layers[i]->as<HubertGroupNormConvLayer>()) {
                 x = layer->forward(x);
             } else if (auto layer = layers[i]->as<HubertNoLayerNormConvLayer>()) {
                 x = layer->forward(x);
             }
-            return x;
+            cerr << "HubertFeatureEncoder: after layer " << i << " = " << x.sizes() << endl;
         }
+        return x;
     }
 };
 
 TORCH_MODULE(HubertFeatureEncoder);
 
-struct MERTImpl : nn::Module {
-    
-    HubertFeatureEncoder fe = nullptr;
+struct MERTFeatureProjectionImpl : nn::Module {
 
-    MERTImpl() {
-        fe = register_module("feature_extractor", HubertFeatureEncoder());
+    nn::LayerNorm layer_norm = nullptr;
+    nn::Linear linear = nullptr;
+
+    //!!! CQT would go here too but it doesn't seem to be in the
+    //!!! config for the reference weights I have?
+    
+    MERTFeatureProjectionImpl() {
+        int64_t inSize = *convDimensions.rbegin();
+        int64_t outSize = hiddenSize;
+        nn::LayerNormOptions options({ inSize });
+        layer_norm = register_module("layer_norm", nn::LayerNorm(options));
+        linear = register_module("projection", nn::Linear(inSize, outSize));
     }
 
     Tensor forward(Tensor x) {
-        return fe->forward(x);
+        cerr << "MERTFeatureProjection: input shape = " << x.sizes() << endl;
+        x = layer_norm(x);
+        cerr << "MERTFeatureProjection: after norm = " << x.sizes() << endl;
+        x = linear(x);
+        cerr << "MERTFeatureProjection: after linear = " << x.sizes() << endl;
+        return x;
+    }
+        
+};
+
+TORCH_MODULE(MERTFeatureProjection);
+
+struct MERTImpl : nn::Module {
+    
+    HubertFeatureEncoder fe = nullptr;
+    MERTFeatureProjection proj = nullptr;
+
+    MERTImpl() {
+        fe = register_module("feature_extractor", HubertFeatureEncoder());
+        proj = register_module("feature_projection", MERTFeatureProjection());
+    }
+
+    Tensor forward(Tensor x) {
+        cerr << "MERT: input shape = " << x.sizes() << endl;
+        x = fe(x);
+        cerr << "MERT: after feature extractor = " << x.sizes() << endl;
+        x = x.transpose(1, 2);
+        cerr << "MERT: after transpose = " << x.sizes() << endl;
+        x = proj(x);
+        cerr << "MERT: after projection = " << x.sizes() << endl;
+        return x;
     }
     
 };
@@ -130,14 +181,14 @@ int main(int argc, char **argv)
         cerr << i.key() << endl;
     }
 
-    ifstream saved("fart.pth", ios::binary);
+    ifstream saved("for_libtorch.pth", ios::binary);
     saved.seekg(0, ios::end);
     auto size = saved.tellg();
     saved.seekg(0, ios::beg);
 
     cerr << "size = " << size << endl;
     if (size <= 0) {
-        exit(2);
+        return 2;
     }
     
     vector<char> buffer(size);
@@ -148,7 +199,7 @@ int main(int argc, char **argv)
     } else {
         cerr << "only read " << saved.gcount() << " of " << size << " chars"
              << endl;
-        exit(2);
+        return 2;
     }
     
     auto obj = pickle_load(buffer);
@@ -162,14 +213,64 @@ int main(int argc, char **argv)
         }
         string key = *(item.key().toString());
         auto value = item.value().toTensor();
-        cerr << key << " -> " << value.sizes() << endl;
+        cerr << key << " -> " << value.sizes();
         if (params.contains(key)) {
             params[key].set_data(value);
+            cerr << " - yes" << endl;
         } else {
-            cerr << "(didn't find this one)" << endl;
+            cerr << " - nope" << endl;
         }
     }
+
+    string testfile = "stairway-intro-16k-mono.wav";
+    SF_INFO sfinfo;
+    SNDFILE *sf = sf_open(testfile.c_str(), SFM_READ, &sfinfo);
+    if (!sf) {
+        cerr << "Failed to open test file " << testfile << endl;
+        return 2;
+    }
+    if (sfinfo.frames == 0) {
+        cerr << "No frame count in test file " << testfile << endl;
+        return 2;
+    }
+    vector<float> data(sfinfo.frames);
+    if (auto count = sf_readf_float(sf, data.data(), sfinfo.frames) != sfinfo.frames) {
+        cerr << "Failed to read whole test file " << testfile
+             << ": read " << count << " of " << sfinfo.frames << " frames "
+             << endl;
+        return 2;
+    }
+    sf_close(sf);
+
+    cerr << "read " << data.size() << "-sample vector from test file "
+         << testfile << endl;
+
+    Tensor input = torch::from_blob(data.data(), { 1, 1, data.size() }).clone();
+
+    Tensor output = mert(input);
+
+    // We did nothing to move it away from the CPU, but just in case
+    // that changes later!
+    Tensor result = output.to(kCPU);
     
+    std::vector<float> v(result.data_ptr<float>(),
+                         result.data_ptr<float>() + result.numel());
+
+    ofstream csv("experiment-out.csv");
+    int nrows = result.sizes()[1];
+    int ncols = result.sizes()[2];
+    cerr << "writing " << nrows << "-row " << ncols << "-column csv" << endl;
+    for (int i = 0; i < nrows; ++i) {
+        csv << i << ",";
+        for (int j = 0; j < ncols; ++j) {
+            csv << v[i * ncols + j];
+            if (j + 1 < ncols) {
+                csv << ",";
+            } else {
+                csv << endl;
+            }
+        }
+    }
 }
 
 
