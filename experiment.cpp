@@ -28,7 +28,15 @@ static const vector<int64_t> convDimensions { 512, 512, 512, 512, 512, 512, 512 
 static const vector<int64_t> convStrides { 5, 2, 2, 2, 2, 2, 2 };
 static const vector<int64_t> convKernels { 10, 3, 3, 3, 3, 2, 2 };
 
-struct HubertNoLayerNormConvLayerImpl : nn::Module {
+struct LayerBase : nn::Module {
+    virtual Tensor forward(Tensor x) = 0;
+};
+
+// important note: this is for inference only - I've omitted some
+// logic that I believe is only used in training (dropout, certain
+// types of masking)
+
+struct HubertNoLayerNormConvLayerImpl : LayerBase {
     nn::Conv1d conv = nullptr;
 
     HubertNoLayerNormConvLayerImpl(int64_t layerId) {
@@ -42,10 +50,11 @@ struct HubertNoLayerNormConvLayerImpl : nn::Module {
         conv = register_module("conv", nn::Conv1d(options));
     }
     
-    Tensor forward(Tensor x) {
+    Tensor forward(Tensor x) override {
         cerr << "HubertNoLayerNormConvLayer: input shape = " << x.sizes() << endl;
         x = conv(x);
         cerr << "HubertNoLayerNormConvLayer: after conv = " << x.sizes() << endl;
+        //!!! maybe it is nicer for the activations to be defined as separate layers rather than just ops
         x = gelu(x);
         return x;
     }
@@ -53,7 +62,7 @@ struct HubertNoLayerNormConvLayerImpl : nn::Module {
 
 TORCH_MODULE(HubertNoLayerNormConvLayer);
 
-struct HubertGroupNormConvLayerImpl : nn::Module {
+struct HubertGroupNormConvLayerImpl : LayerBase {
     nn::Conv1d conv = nullptr;
     nn::GroupNorm layer_norm = nullptr;
     
@@ -72,7 +81,7 @@ struct HubertGroupNormConvLayerImpl : nn::Module {
         layer_norm = register_module("layer_norm", nn::GroupNorm(normOptions));
     }
     
-    Tensor forward(Tensor x) {
+    Tensor forward(Tensor x) override {
         cerr << "HubertGroupNormConvLayer: input shape = " << x.sizes() << endl;
         x = conv(x);
         cerr << "HubertGroupNormConvLayer: after conv = " << x.sizes() << endl;
@@ -88,10 +97,7 @@ TORCH_MODULE(HubertGroupNormConvLayer);
 struct HubertFeatureEncoderImpl : nn::Module {
 
     nn::ModuleList layers;
-/*    
-    HubertGroupNormConvLayer groupNormLayer = nullptr;
-    vector<HubertNoLayerNormConvLayer> noLayerNormLayers;
-*/
+
     HubertFeatureEncoderImpl() {
         layers = register_module("conv_layers", nn::ModuleList());
         layers->push_back(register_module("0", HubertGroupNormConvLayer(0)));
@@ -103,12 +109,14 @@ struct HubertFeatureEncoderImpl : nn::Module {
     Tensor forward(Tensor x) {
         cerr << "HubertFeatureEncoder: input shape = " << x.sizes() << endl;
         for (int i = 0; i < layers->size(); ++i) {
-            if (auto layer = layers[i]->as<HubertGroupNormConvLayer>()) {
+            if (auto layer = layers[i]->as<LayerBase>()) {
                 x = layer->forward(x);
-            } else if (auto layer = layers[i]->as<HubertNoLayerNormConvLayer>()) {
-                x = layer->forward(x);
+                cerr << "HubertFeatureEncoder: after layer " << i << " = "
+                     << x.sizes() << endl;
+            } else {
+                cerr << "HubertFeatureEncoder: Unexpected type for layer " << i
+                     << endl;
             }
-            cerr << "HubertFeatureEncoder: after layer " << i << " = " << x.sizes() << endl;
         }
         return x;
     }
@@ -145,14 +153,92 @@ struct MERTFeatureProjectionImpl : nn::Module {
 
 TORCH_MODULE(MERTFeatureProjection);
 
+struct HubertSamePadLayerImpl : nn::Module {
+
+    //!!!
+    HubertSamePadLayerImpl() { }
+    
+};
+
+TORCH_MODULE(HubertSamePadLayer);
+
+struct HubertPositionalConvEmbeddingImpl : nn::Module {
+
+    nn::Conv1d conv = nullptr;
+    HubertSamePadLayer padding = nullptr;
+    
+    //!!!
+    HubertPositionalConvEmbeddingImpl() { }
+    
+};
+
+TORCH_MODULE(HubertPositionalConvEmbedding);
+
+struct HubertAttentionImpl : nn::Module {
+
+    nn::Linear k_proj = nullptr;
+    nn::Linear v_proj = nullptr;
+    nn::Linear q_proj = nullptr;
+    nn::Linear out_proj = nullptr;
+
+    //!!!
+    HubertAttentionImpl() { }
+    
+};
+
+TORCH_MODULE(HubertAttention);
+
+struct HubertFeedForwardImpl : nn::Module {
+
+    nn::Linear intermediate_dense = nullptr;
+    nn::Linear output_dense = nullptr;
+
+    //!!!
+    HubertFeedForwardImpl() { }
+    
+};
+
+TORCH_MODULE(HubertFeedForward);
+
+
+struct HubertEncoderLayerImpl : nn::Module {
+
+    HubertAttention attention = nullptr;
+    nn::LayerNorm layer_norm = nullptr;
+    HubertFeedForward feed_forward = nullptr;
+    nn::LayerNorm final_layer_norm = nullptr;
+
+    //!!!
+    HubertEncoderLayerImpl() { }
+    
+};
+
+TORCH_MODULE(HubertEncoderLayer);
+
+struct HubertEncoderImpl : nn::Module {
+
+    HubertPositionalConvEmbedding pos_conv_embed = nullptr;
+    nn::LayerNorm layer_norm = nullptr;
+    nn::ModuleList layers;
+
+    //!!!
+    HubertEncoderImpl() { }
+
+    
+};
+
+TORCH_MODULE(HubertEncoder);
+
 struct MERTImpl : nn::Module {
     
     HubertFeatureEncoder fe = nullptr;
     MERTFeatureProjection proj = nullptr;
+    HubertEncoder encoder = nullptr;
 
     MERTImpl() {
         fe = register_module("feature_extractor", HubertFeatureEncoder());
         proj = register_module("feature_projection", MERTFeatureProjection());
+        encoder = register_module("encoder", HubertEncoder());
     }
 
     Tensor forward(Tensor x) {
@@ -163,6 +249,7 @@ struct MERTImpl : nn::Module {
         cerr << "MERT: after transpose = " << x.sizes() << endl;
         x = proj(x);
         cerr << "MERT: after projection = " << x.sizes() << endl;
+        //...
         return x;
     }
     
