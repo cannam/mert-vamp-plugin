@@ -22,7 +22,7 @@ static const int64_t hiddenSize { 768 };
 static const int64_t nHiddenLayers { 12 };
 static const int64_t nAttentionHeads { 12 };
 static const int64_t nConvPosEmbeddings { 128 };
-static const int64_t nConfPosEmbeddingGroups { 16 };
+static const int64_t nConvPosEmbeddingGroups { 16 };
 static const int64_t intermediateSize { 3072 };
 static const vector<int64_t> convDimensions { 512, 512, 512, 512, 512, 512, 512 };
 static const vector<int64_t> convStrides { 5, 2, 2, 2, 2, 2, 2 };
@@ -155,8 +155,20 @@ TORCH_MODULE(MERTFeatureProjection);
 
 struct HubertSamePadLayerImpl : nn::Module {
 
-    //!!!
     HubertSamePadLayerImpl() { }
+
+    Tensor forward(Tensor x) {
+        if (nConvPosEmbeddings % 2 == 0) {
+            // [:, :, : -1]
+            return x.index({
+                    indexing::Slice(),
+                    indexing::Slice(),
+                    indexing::Slice(indexing::None, -1)
+                });
+        } else {
+            return x;
+        }
+    }
     
 };
 
@@ -167,8 +179,33 @@ struct HubertPositionalConvEmbeddingImpl : nn::Module {
     nn::Conv1d conv = nullptr;
     HubertSamePadLayer padding = nullptr;
     
-    //!!!
-    HubertPositionalConvEmbeddingImpl() { }
+    HubertPositionalConvEmbeddingImpl() {
+
+        // There doesn't *appear* to be a direct translation of
+        // weight_norm in libtorch?
+
+        // nb weight_norm is constructed with dim=2
+        
+        nn::Conv1dOptions options =
+            nn::Conv1dOptions(hiddenSize, hiddenSize, nConvPosEmbeddings)
+            .padding(nConvPosEmbeddings/2)
+            .groups(nConvPosEmbeddingGroups);
+
+        conv = register_module("conv", nn::Conv1d(options));
+
+        padding = register_module("padding", HubertSamePadLayer());
+
+    }
+
+    Tensor forward(Tensor x) {
+        cerr << "HubertSamePadLayer: input shape = " << x.sizes() << endl;
+        x = conv(x);
+        cerr << "HubertSamePadLayer: after conv = " << x.sizes() << endl;
+        x = padding(x);
+        cerr << "HubertSamePadLayer: after padding = " << x.sizes() << endl;
+        x = gelu(x);
+        return x;
+    }
     
 };
 
