@@ -185,6 +185,11 @@ struct HubertPositionalConvEmbeddingImpl : nn::Module {
         // weight_norm in libtorch?
 
         // nb weight_norm is constructed with dim=2
+
+        // See pytorch/aten/src/ATen/native/WeightNorm.cpp for most of
+        // the implementation - perhaps we could even wangle calling it
+
+        //!!! For now let's skip weight norm?
         
         nn::Conv1dOptions options =
             nn::Conv1dOptions(hiddenSize, hiddenSize, nConvPosEmbeddings)
@@ -197,14 +202,18 @@ struct HubertPositionalConvEmbeddingImpl : nn::Module {
 
     }
 
-    Tensor forward(Tensor x) {
-        cerr << "HubertSamePadLayer: input shape = " << x.sizes() << endl;
-        x = conv(x);
-        cerr << "HubertSamePadLayer: after conv = " << x.sizes() << endl;
-        x = padding(x);
-        cerr << "HubertSamePadLayer: after padding = " << x.sizes() << endl;
-        x = gelu(x);
-        return x;
+    Tensor forward(Tensor hidden_states) {
+        cerr << "HubertPositionalConvEmbedding: input shape = " << hidden_states.sizes() << endl;
+        hidden_states = hidden_states.transpose(1, 2);
+        cerr << "HubertPositionalConvEmbedding: after transpose = " << hidden_states.sizes() << endl;
+        hidden_states = conv(hidden_states);
+        cerr << "HubertPositionalConvEmbedding: after conv = " << hidden_states.sizes() << endl;
+        hidden_states = padding(hidden_states);
+        cerr << "HubertPositionalConvEmbedding: after padding = " << hidden_states.sizes() << endl;
+        hidden_states = gelu(hidden_states);
+        hidden_states = hidden_states.transpose(1, 2);
+        cerr << "HubertPositionalConvEmbedding: returned shape = " << hidden_states.sizes() << endl;
+        return hidden_states;
     }
     
 };
@@ -218,8 +227,87 @@ struct HubertAttentionImpl : nn::Module {
     nn::Linear q_proj = nullptr;
     nn::Linear out_proj = nullptr;
 
-    //!!!
-    HubertAttentionImpl() { }
+    int64_t embed_dim;
+    int64_t num_heads;
+    int64_t head_dim;
+    double scaling;
+    
+    HubertAttentionImpl() :
+        embed_dim(hiddenSize),
+        num_heads(nAttentionHeads),
+        head_dim(embed_dim / num_heads),
+        scaling(pow(head_dim, -0.5)) {
+        k_proj = register_module("k_proj", nn::Linear(embed_dim, embed_dim));
+        v_proj = register_module("v_proj", nn::Linear(embed_dim, embed_dim));
+        q_proj = register_module("q_proj", nn::Linear(embed_dim, embed_dim));
+        out_proj = register_module("out_proj", nn::Linear(embed_dim, embed_dim));
+    }
+
+    Tensor shape(Tensor x, int64_t seq_len, int64_t bsz) {
+        vector<int64_t> dim { bsz, seq_len, num_heads, head_dim };
+        return x.view(dim).transpose(1, 2).contiguous();
+    }
+    
+    pair<Tensor, Tensor> forward(Tensor hidden_states) {
+        cerr << "HubertAttention: input shape = " << hidden_states.sizes() << endl;
+
+        // "Input shape: Batch x Time x Channel"
+        auto bsz = hidden_states.sizes()[0];
+        auto tgt_len = hidden_states.sizes()[1];
+        //!!! why do we just reshape it twice? what is the point?
+        Tensor query_states = q_proj(hidden_states) * scaling;
+        Tensor key_states = shape(k_proj(hidden_states), -1, bsz);
+        Tensor value_states = shape(v_proj(hidden_states), -1, bsz);
+        
+        cerr << "HubertAttention: initial query_states = " << query_states.sizes() << endl;
+        cerr << "HubertAttention: initial key_states = " << key_states.sizes() << endl;
+        cerr << "HubertAttention: initial value_states = " << value_states.sizes() << endl;
+
+        vector<int64_t> proj_shape { bsz * num_heads, -1, head_dim };
+        query_states = shape(query_states, tgt_len, bsz).view(proj_shape);
+        key_states = key_states.reshape(proj_shape);
+        value_states = value_states.reshape(proj_shape);
+
+        cerr << "HubertAttention: subsequent query_states = " << query_states.sizes() << endl;
+        cerr << "HubertAttention: subsequent key_states = " << key_states.sizes() << endl;
+        cerr << "HubertAttention: subsequent value_states = " << value_states.sizes() << endl;
+
+        int64_t src_len = key_states.sizes()[1];
+        Tensor attn_weights = bmm(query_states, key_states.transpose(1, 2));
+
+        cerr << "HubertAttention: attn_weights = " << attn_weights.sizes() << endl;
+        
+        vector<int64_t> expected { bsz * num_heads, tgt_len, src_len };
+        if (attn_weights.sizes() != expected) {
+            cerr << "Attention weights should be of size " << expected
+                 << " but are of size " << attn_weights.sizes() << endl;
+        }
+
+        //!!! Attention mask -> ???, layer head mask -> apparently unused?
+        // output_attentions -> false, dropout -> unused
+
+        attn_weights = softmax(attn_weights, -1);
+
+        Tensor attn_output = bmm(attn_weights, value_states);
+        
+        cerr << "HubertAttention: attn_output = " << attn_output.sizes() << endl;
+        
+        expected = { bsz * num_heads, tgt_len, head_dim };
+        if (attn_output.sizes() != expected) {
+            cerr << "Attention output should be of size " << expected
+                 << " but are of size " << attn_weights.sizes() << endl;
+        }
+
+        vector<int64_t> out_shape { bsz, tgt_len, embed_dim };
+        attn_output = attn_output.view(out_shape);
+
+        attn_output = out_proj(attn_output);
+
+        cerr << "HubertAttention: result attn_output = " << attn_output.sizes() << endl;
+        cerr << "HubertAttention: result attn_weights = " << attn_weights.sizes() << endl;
+        
+        return { attn_output, attn_weights };
+    }
     
 };
 
@@ -230,8 +318,21 @@ struct HubertFeedForwardImpl : nn::Module {
     nn::Linear intermediate_dense = nullptr;
     nn::Linear output_dense = nullptr;
 
-    //!!!
-    HubertFeedForwardImpl() { }
+    HubertFeedForwardImpl() {
+        intermediate_dense = register_module
+            ("intermediate_dense", nn::Linear(hiddenSize, intermediateSize));
+        output_dense = register_module
+            ("output_dense", nn::Linear(intermediateSize, hiddenSize));
+    }
+
+    Tensor forward(Tensor hidden_states) {
+        cerr << "HubertFeedForward: input shape = " << hidden_states.sizes() << endl;
+        hidden_states = intermediate_dense(hidden_states);
+        hidden_states = gelu(hidden_states);
+        hidden_states = output_dense(hidden_states);
+        cerr << "HubertFeedForward: returning shape = " << hidden_states.sizes() << endl;
+        return hidden_states;
+    }
     
 };
 
@@ -245,8 +346,30 @@ struct HubertEncoderLayerImpl : nn::Module {
     HubertFeedForward feed_forward = nullptr;
     nn::LayerNorm final_layer_norm = nullptr;
 
-    //!!!
-    HubertEncoderLayerImpl() { }
+    HubertEncoderLayerImpl() {
+        //!!! in the Python there is a choice of "eager" -> HubertAttention,
+        // "sdpa" -> HubertSdpaAttention, "flash" -> HubertFlashAttention2.
+        // The layer actually constructed in our example is "eager"
+        attention = register_module("attention", HubertAttention());
+        nn::LayerNormOptions options({ hiddenSize });
+        layer_norm = register_module("layer_norm", nn::LayerNorm(options));
+        feed_forward = register_module("feed_forward", HubertFeedForward());
+        final_layer_norm = register_module("final_layer_norm", nn::LayerNorm(options));
+    }
+
+    Tensor forward(Tensor hidden_states) {
+        cerr << "HubertEncoderLayer: input shape = " << hidden_states.sizes() << endl;
+        Tensor attn_residual = hidden_states;
+        auto attentionResult = attention(hidden_states);
+        hidden_states = attentionResult.first;
+        Tensor attn_weights = attentionResult.second;
+        hidden_states = attn_residual + hidden_states;
+        hidden_states = layer_norm(hidden_states);
+        hidden_states = hidden_states + feed_forward(hidden_states);
+        hidden_states = final_layer_norm(hidden_states);
+        cerr << "HubertEncoderLayer: returning shape = " << hidden_states.sizes() << endl;
+        return hidden_states;
+    }
     
 };
 
@@ -258,9 +381,37 @@ struct HubertEncoderImpl : nn::Module {
     nn::LayerNorm layer_norm = nullptr;
     nn::ModuleList layers;
 
-    //!!!
-    HubertEncoderImpl() { }
+    HubertEncoderImpl() {
+        pos_conv_embed = register_module
+            ("pos_conv_embed", HubertPositionalConvEmbedding());
+        nn::LayerNormOptions options({ hiddenSize });
+        layer_norm = register_module("layer_norm", nn::LayerNorm(options));
+        layers = register_module("layers", nn::ModuleList());
+        for (int i = 0; i < nHiddenLayers; ++i) {
+            layers->push_back(register_module(to_string(i), HubertEncoderLayer()));
+        }
+    }
 
+    vector<Tensor> forward(Tensor hidden_states) {
+        Tensor position_embeddings = pos_conv_embed(hidden_states);
+        hidden_states = hidden_states + position_embeddings;
+        hidden_states = layer_norm(hidden_states);
+
+        vector<Tensor> all_hidden_states;
+        all_hidden_states.push_back(hidden_states);
+        
+        for (int i = 0; i < layers->size(); ++i) {
+            if (auto layer = layers[i]->as<HubertEncoderLayer>()) {
+                hidden_states = layer->forward(hidden_states);
+                cerr << "HubertEncoder: after layer " << i << " = "
+                     << hidden_states.sizes() << endl;
+                //!!! probably have to copy this explicitly
+                all_hidden_states.push_back(hidden_states);
+            }
+        }
+
+        return all_hidden_states;
+    }
     
 };
 
@@ -268,26 +419,26 @@ TORCH_MODULE(HubertEncoder);
 
 struct MERTImpl : nn::Module {
     
-    HubertFeatureEncoder fe = nullptr;
-    MERTFeatureProjection proj = nullptr;
+    HubertFeatureEncoder feature_extractor = nullptr;
+    MERTFeatureProjection feature_projection = nullptr;
     HubertEncoder encoder = nullptr;
 
     MERTImpl() {
-        fe = register_module("feature_extractor", HubertFeatureEncoder());
-        proj = register_module("feature_projection", MERTFeatureProjection());
+        feature_extractor = register_module("feature_extractor", HubertFeatureEncoder());
+        feature_projection = register_module("feature_projection", MERTFeatureProjection());
         encoder = register_module("encoder", HubertEncoder());
     }
 
-    Tensor forward(Tensor x) {
-        cerr << "MERT: input shape = " << x.sizes() << endl;
-        x = fe(x);
-        cerr << "MERT: after feature extractor = " << x.sizes() << endl;
-        x = x.transpose(1, 2);
-        cerr << "MERT: after transpose = " << x.sizes() << endl;
-        x = proj(x);
-        cerr << "MERT: after projection = " << x.sizes() << endl;
-        //...
-        return x;
+    vector<Tensor> forward(Tensor input_values) {
+        cerr << "MERT: input shape = " << input_values.sizes() << endl;
+        Tensor extract_features = feature_extractor(input_values);
+        cerr << "MERT: after feature extractor = " << extract_features.sizes() << endl;
+        extract_features = extract_features.transpose(1, 2);
+        cerr << "MERT: after transpose = " << extract_features.sizes() << endl;
+        Tensor hidden_states = feature_projection(extract_features);
+        cerr << "MERT: after projection = " << hidden_states.sizes() << endl;
+        auto encoder_outputs = encoder(hidden_states);
+        return encoder_outputs;
     }
     
 };
@@ -346,7 +497,9 @@ int main(int argc, char **argv)
         }
     }
 
-    string testfile = "stairway-intro-16k-mono.wav";
+//    string testfile = "stairway-intro-16k-mono.wav";
+    string testfile = "gerudo.wav";
+    
     SF_INFO sfinfo;
     SNDFILE *sf = sf_open(testfile.c_str(), SFM_READ, &sfinfo);
     if (!sf) {
@@ -371,11 +524,15 @@ int main(int argc, char **argv)
 
     Tensor input = torch::from_blob(data.data(), { 1, 1, data.size() }).clone();
 
-    Tensor output = mert(input);
+    vector<Tensor> output = mert(input);
 
+    cerr << "received " << output.size() << " tensors as output" << endl;
+
+    int layerOfInterest = 12;
+    
     // We did nothing to move it away from the CPU, but just in case
     // that changes later!
-    Tensor result = output.to(kCPU);
+    Tensor result = output[layerOfInterest].to(kCPU);
     
     std::vector<float> v(result.data_ptr<float>(),
                          result.data_ptr<float>() + result.numel());
