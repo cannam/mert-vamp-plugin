@@ -41,9 +41,6 @@ void dump(Tensor t, string filebase)
     // that changes later!
     t = t.to(kCPU).contiguous();
 
-    cerr << "layout = " << t.layout() << endl;
-    cerr << "strides = " << t.strides() << endl;
-    
     vector<float> v(t.data_ptr<float>(), t.data_ptr<float>() + t.numel());
     
     string filename = filebase + ".csv";
@@ -294,6 +291,7 @@ struct HubertAttentionImpl : nn::Module {
         // "Input shape: Batch x Time x Channel"
         auto bsz = hidden_states.sizes()[0];
         auto tgt_len = hidden_states.sizes()[1];
+
         //!!! why do we just reshape it twice? what is the point?
         Tensor query_states = q_proj(hidden_states) * scaling;
         Tensor key_states = shape(k_proj(hidden_states), -1, bsz);
@@ -338,8 +336,9 @@ struct HubertAttentionImpl : nn::Module {
                  << " but are of size " << attn_weights.sizes() << endl;
         }
 
-        vector<int64_t> out_shape { bsz, tgt_len, embed_dim };
-        attn_output = attn_output.view(out_shape);
+        attn_output = attn_output.view({ bsz, num_heads, tgt_len, head_dim });
+        attn_output = attn_output.transpose(1, 2);
+        attn_output = attn_output.reshape({ bsz, tgt_len, embed_dim });
 
         attn_output = out_proj(attn_output);
 
@@ -403,6 +402,7 @@ struct HubertEncoderLayerImpl : nn::Module {
         auto attentionResult = attention(hidden_states);
         hidden_states = attentionResult.first;
         Tensor attn_weights = attentionResult.second;
+
         hidden_states = attn_residual + hidden_states;
         hidden_states = layer_norm(hidden_states);
         hidden_states = hidden_states + feed_forward(hidden_states);
@@ -433,11 +433,8 @@ struct HubertEncoderImpl : nn::Module {
     }
 
     vector<Tensor> forward(Tensor hidden_states) {
-        dump(hidden_states, "mert-cpp-encoder-input");
         
         Tensor position_embeddings = pos_conv_embed(hidden_states);
-
-        dump(position_embeddings, "mert-cpp-encoder-pos");
 
         hidden_states = hidden_states + position_embeddings;
         hidden_states = layer_norm(hidden_states);
@@ -445,8 +442,6 @@ struct HubertEncoderImpl : nn::Module {
         vector<Tensor> all_hidden_states;
         all_hidden_states.push_back(hidden_states);
 
-        dump(hidden_states, "mert-cpp-encoder-prep");
-        
         for (int i = 0; i < layers->size(); ++i) {
             if (auto layer = layers[i]->as<HubertEncoderLayer>()) {
                 hidden_states = layer->forward(hidden_states);
@@ -454,7 +449,6 @@ struct HubertEncoderImpl : nn::Module {
                      << hidden_states.sizes() << endl;
                 //!!! probably have to copy this explicitly
                 all_hidden_states.push_back(hidden_states);
-                dump(hidden_states, "mert-cpp-encoder-" + to_string(i));
             }
         }
 
@@ -483,10 +477,8 @@ struct MERTImpl : nn::Module {
         cerr << "MERT: after feature extractor = " << extract_features.sizes() << endl;
         extract_features = extract_features.transpose(1, 2);
         cerr << "MERT: after transpose = " << extract_features.sizes() << endl;
-        dump(extract_features, "mert-cpp-features");
         Tensor hidden_states = feature_projection(extract_features);
         cerr << "MERT: after projection = " << hidden_states.sizes() << endl;
-        dump(hidden_states, "mert-cpp-projection");
         auto encoder_outputs = encoder(hidden_states);
         return encoder_outputs;
     }
@@ -580,84 +572,8 @@ int main(int argc, char **argv)
 
     int layerOfInterest = 12;
     
-    // We did nothing to move it away from the CPU, but just in case
-    // that changes later!
-    Tensor result = output[layerOfInterest].to(kCPU);
-    
-    vector<float> v(result.data_ptr<float>(),
-                    result.data_ptr<float>() + result.numel());
+    Tensor result = output[layerOfInterest];
 
-    ofstream csv("experiment-out.csv");
-    int nrows = result.sizes()[1];
-    int ncols = result.sizes()[2];
-    cerr << "writing " << nrows << "-row " << ncols << "-column csv" << endl;
-    for (int i = 0; i < nrows; ++i) {
-        csv << i << ",";
-        for (int j = 0; j < ncols; ++j) {
-            csv << v[i * ncols + j];
-            if (j + 1 < ncols) {
-                csv << ",";
-            } else {
-                csv << endl;
-            }
-        }
-    }
+    dump(result, "experiment-out");
 }
 
-
-/*
-
-struct TransformerEncoderLayerImpl : torch::nn::Module
-{
-    torch::nn::MultiheadAttention self_attn{nullptr};
-    torch::nn::Linear linear1{nullptr}, linear2{nullptr};
-    torch::nn::LayerNorm norm1{nullptr}, norm2{nullptr};
-    torch::nn::Dropout dropout{nullptr}, dropout1{nullptr}, dropout2{nullptr};
-
-    TransformerEncoderLayerImpl(int64_t d_model, int64_t nhead,
-                                int64_t dim_feedforward = 2048,
-                                double dropout_prob = 0.1)
-    {
-        self_attn = register_module("self_attn", torch::nn::MultiheadAttention(torch::nn::MultiheadAttentionOptions(d_model, nhead)));
-        linear1 = register_module("linear1", torch::nn::Linear(d_model, dim_feedforward));
-        linear2 = register_module("linear2", torch::nn::Linear(dim_feedforward, d_model));
-        norm1 = register_module("norm1", torch::nn::LayerNorm(d_model));
-        norm2 = register_module("norm2", torch::nn::LayerNorm(d_model));
-        dropout = register_module("dropout", torch::nn::Dropout(dropout_prob));
-        dropout1 = register_module("dropout1", torch::nn::Dropout(dropout_prob));
-        dropout2 = register_module("dropout2", torch::nn::Dropout(dropout_prob));
-    }
-
-    torch::Tensor forward(torch::Tensor src) {
-        // src: [T, B, D] (time-major)
-        auto attn_output = std::get<0>(self_attn(src, src, src));  // Self-attention
-        src = norm1(src + dropout1(attn_output));                 // Residual + Norm
-
-        auto ff = dropout2(linear2(torch::relu(linear1(src))));  // Feedforward
-        src = norm2(src + ff);                                    // Residual + Norm
-        return src;
-    }
-};
-
-TORCH_MODULE(TransformerEncoderLayer);
-
-struct MyEncoderImpl : torch::nn::Module {
-    std::vector<TransformerEncoderLayer> layers;
-
-    MyEncoderImpl(int64_t num_layers, int64_t d_model, int64_t nhead) {
-        for (int i = 0; i < num_layers; ++i) {
-            layers.push_back(register_module("layer_" + std::to_string(i), TransformerEncoderLayer(d_model, nhead)));
-        }
-    }
-
-    torch::Tensor forward(torch::Tensor x) {
-        for (auto& layer : layers) {
-            x = layer->forward(x);
-        }
-        return x;
-    }
-};
-
-TORCH_MODULE(MyEncoder);
-
-*/

@@ -504,7 +504,7 @@ class HubertAttention(nn.Module):
         attn_output = attn_output.reshape(bsz, tgt_len, self.embed_dim)
 
         attn_output = self.out_proj(attn_output)
-
+        
         return attn_output, attn_weights_reshaped, past_key_value
 
 
@@ -798,6 +798,7 @@ class HubertEncoderLayer(nn.Module):
         hidden_states, attn_weights, _ = self.attention(
             hidden_states, attention_mask=attention_mask, output_attentions=output_attentions
         )
+
         hidden_states = self.dropout(hidden_states)
         hidden_states = attn_residual + hidden_states
 
@@ -902,10 +903,6 @@ class HubertEncoder(nn.Module):
         output_hidden_states: bool = False,
         return_dict: bool = True,
     ):
-
-        print(f'encoder input = {hidden_states.shape}')
-        frame = pd.DataFrame(hidden_states[0].numpy())
-        frame.to_csv("mert-py-encoder-input.csv", index=False)
         
         if attention_mask is not None:
             # make sure padded tokens output 0
@@ -928,10 +925,6 @@ class HubertEncoder(nn.Module):
             
         position_embeddings = self.pos_conv_embed(hidden_states)
 
-        print(f'encoder position embeddings = {position_embeddings.shape}')
-        frame = pd.DataFrame(position_embeddings[0].numpy())
-        frame.to_csv("mert-py-encoder-pos.csv", index=False)
-
         hidden_states = hidden_states + position_embeddings
         hidden_states = self.layer_norm(hidden_states)
         hidden_states = self.dropout(hidden_states)
@@ -939,11 +932,6 @@ class HubertEncoder(nn.Module):
         all_hidden_states = (hidden_states,)
 #        all_self_attentions = () if output_attentions else None
 
-        print(f'in prep for encoder rounds = {hidden_states.shape}')
-        frame = pd.DataFrame(hidden_states[0].numpy())
-        frame.to_csv("mert-py-encoder-prep.csv", index=False)
-
-        i = 0
         
         for layer in self.layers:
 
@@ -956,11 +944,6 @@ class HubertEncoder(nn.Module):
                 
             hidden_states = layer_outputs[0]
             all_hidden_states = all_hidden_states + (hidden_states,)
-
-            print(f'after encoder round {i} = {hidden_states.shape}')
-            frame = pd.DataFrame(hidden_states[0].numpy())
-            frame.to_csv("mert-py-encoder-" + str(i) + ".csv", index=False)
-            i = i + 1
 
 #            if output_attentions:
 #                all_self_attentions = all_self_attentions + (layer_outputs[1],)
