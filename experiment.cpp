@@ -32,6 +32,46 @@ struct LayerBase : nn::Module {
     virtual Tensor forward(Tensor x) = 0;
 };
 
+void dump(Tensor t, string filebase)
+{
+    // We assume t has channels as first dimension but only has one
+    // channel, so we can treat as 2-d
+    
+    // We did nothing to move it away from the CPU, but just in case
+    // that changes later!
+    t = t.to(kCPU).contiguous();
+
+    cerr << "layout = " << t.layout() << endl;
+    cerr << "strides = " << t.strides() << endl;
+    
+    vector<float> v(t.data_ptr<float>(), t.data_ptr<float>() + t.numel());
+    
+    string filename = filebase + ".csv";
+    ofstream csv(filename);
+    int nrows = t.sizes()[1];
+    int ncols = t.sizes()[2];
+    cerr << "writing " << nrows << "-row " << ncols << "-column csv to "
+         << filename << endl;
+    for (int j = 0; j < ncols; ++j) {
+        csv << j;
+        if (j + 1 < ncols) {
+            csv << ",";
+        } else {
+            csv << endl;
+        }
+    }
+    for (int i = 0; i < nrows; ++i) {
+        for (int j = 0; j < ncols; ++j) {
+            csv << v[i * ncols + j];
+            if (j + 1 < ncols) {
+                csv << ",";
+            } else {
+                csv << endl;
+            }
+        }
+    }
+}
+
 // important note: this is for inference only - I've omitted some
 // logic that I believe is only used in training (dropout, certain
 // types of masking)
@@ -393,12 +433,19 @@ struct HubertEncoderImpl : nn::Module {
     }
 
     vector<Tensor> forward(Tensor hidden_states) {
+        dump(hidden_states, "mert-cpp-encoder-input");
+        
         Tensor position_embeddings = pos_conv_embed(hidden_states);
+
+        dump(position_embeddings, "mert-cpp-encoder-pos");
+
         hidden_states = hidden_states + position_embeddings;
         hidden_states = layer_norm(hidden_states);
 
         vector<Tensor> all_hidden_states;
         all_hidden_states.push_back(hidden_states);
+
+        dump(hidden_states, "mert-cpp-encoder-prep");
         
         for (int i = 0; i < layers->size(); ++i) {
             if (auto layer = layers[i]->as<HubertEncoderLayer>()) {
@@ -407,6 +454,7 @@ struct HubertEncoderImpl : nn::Module {
                      << hidden_states.sizes() << endl;
                 //!!! probably have to copy this explicitly
                 all_hidden_states.push_back(hidden_states);
+                dump(hidden_states, "mert-cpp-encoder-" + to_string(i));
             }
         }
 
@@ -435,8 +483,10 @@ struct MERTImpl : nn::Module {
         cerr << "MERT: after feature extractor = " << extract_features.sizes() << endl;
         extract_features = extract_features.transpose(1, 2);
         cerr << "MERT: after transpose = " << extract_features.sizes() << endl;
+        dump(extract_features, "mert-cpp-features");
         Tensor hidden_states = feature_projection(extract_features);
         cerr << "MERT: after projection = " << hidden_states.sizes() << endl;
+        dump(hidden_states, "mert-cpp-projection");
         auto encoder_outputs = encoder(hidden_states);
         return encoder_outputs;
     }
@@ -534,8 +584,8 @@ int main(int argc, char **argv)
     // that changes later!
     Tensor result = output[layerOfInterest].to(kCPU);
     
-    std::vector<float> v(result.data_ptr<float>(),
-                         result.data_ptr<float>() + result.numel());
+    vector<float> v(result.data_ptr<float>(),
+                    result.data_ptr<float>() + result.numel());
 
     ofstream csv("experiment-out.csv");
     int nrows = result.sizes()[1];

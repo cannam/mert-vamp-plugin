@@ -24,6 +24,8 @@ from torch import nn
 from torch import Tensor
 from torch.nn import CrossEntropyLoss
 
+import pandas as pd
+
 from transformers.activations import ACT2FN
 from transformers.modeling_outputs import BaseModelOutput, CausalLMOutput, SequenceClassifierOutput
 from transformers.modeling_utils import PreTrainedModel
@@ -291,8 +293,11 @@ class HubertPositionalConvEmbedding(nn.Module):
         hidden_states = hidden_states.transpose(1, 2)
         if self.batch_norm is not None:
             hidden_states = self.batch_norm(hidden_states)
+        print(f'in pos conv, before conv = {hidden_states.shape}')
         hidden_states = self.conv(hidden_states)
+        print(f'in pos conv, after conv = {hidden_states.shape}')
         hidden_states = self.padding(hidden_states)
+        print(f'in pos conv, after padding = {hidden_states.shape}')
         hidden_states = self.activation(hidden_states)
 
         hidden_states = hidden_states.transpose(1, 2)
@@ -897,6 +902,11 @@ class HubertEncoder(nn.Module):
         output_hidden_states: bool = False,
         return_dict: bool = True,
     ):
+
+        print(f'encoder input = {hidden_states.shape}')
+        frame = pd.DataFrame(hidden_states[0].numpy())
+        frame.to_csv("mert-py-encoder-input.csv", index=False)
+        
         if attention_mask is not None:
             # make sure padded tokens output 0
             expand_attention_mask = attention_mask.unsqueeze(-1).repeat(1, 1, hidden_states.shape[2])
@@ -917,6 +927,11 @@ class HubertEncoder(nn.Module):
         opt_applied_mask = applied_mask if attention_mask is not None else None
             
         position_embeddings = self.pos_conv_embed(hidden_states)
+
+        print(f'encoder position embeddings = {position_embeddings.shape}')
+        frame = pd.DataFrame(position_embeddings[0].numpy())
+        frame.to_csv("mert-py-encoder-pos.csv", index=False)
+
         hidden_states = hidden_states + position_embeddings
         hidden_states = self.layer_norm(hidden_states)
         hidden_states = self.dropout(hidden_states)
@@ -924,6 +939,12 @@ class HubertEncoder(nn.Module):
         all_hidden_states = (hidden_states,)
 #        all_self_attentions = () if output_attentions else None
 
+        print(f'in prep for encoder rounds = {hidden_states.shape}')
+        frame = pd.DataFrame(hidden_states[0].numpy())
+        frame.to_csv("mert-py-encoder-prep.csv", index=False)
+
+        i = 0
+        
         for layer in self.layers:
 
             # add LayerDrop (see https://arxiv.org/abs/1909.11556 for description)
@@ -935,6 +956,11 @@ class HubertEncoder(nn.Module):
                 
             hidden_states = layer_outputs[0]
             all_hidden_states = all_hidden_states + (hidden_states,)
+
+            print(f'after encoder round {i} = {hidden_states.shape}')
+            frame = pd.DataFrame(hidden_states[0].numpy())
+            frame.to_csv("mert-py-encoder-" + str(i) + ".csv", index=False)
+            i = i + 1
 
 #            if output_attentions:
 #                all_self_attentions = all_self_attentions + (layer_outputs[1],)

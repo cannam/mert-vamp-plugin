@@ -7,6 +7,8 @@ import numpy as np
 import librosa
 from torchinfo import summary
 
+import torch.nn.utils.parametrize as parametrize
+
 from modeling_MERT import *
 
 config = MERTConfig()
@@ -14,6 +16,9 @@ model = MERTModel(config)
 
 dict=torch.load('pytorch_model.bin')
 model.load_state_dict(dict)
+summary(model)
+
+parametrize.remove_parametrizations(model.encoder.pos_conv_embed.conv, 'weight')
 summary(model)
 
 w = { k : v for k, v in model.state_dict().items() }
@@ -29,7 +34,8 @@ print(model)
 #scripted_model = torch.jit.script(model)
 #scripted_model.save("scripted_model.pt")
 
-audio, file_rate = librosa.load('stairway-intro-16k-mono.wav', sr = 16000, mono = True)
+#audio, file_rate = librosa.load('stairway-intro-16k-mono.wav', sr = 16000, mono = True)
+audio, file_rate = librosa.load('gerudo.wav', sr = 16000, mono = True)
 t_audio = torch.from_numpy(np.array([audio]))
 
 with torch.no_grad():

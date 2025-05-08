@@ -10,6 +10,8 @@ from transformers.modeling_outputs import BaseModelOutput
 import torch
 from torch import nn
 
+import pandas as pd
+
 from modeling_hubert import (
     HubertFeatureEncoder,
     HubertModel,
@@ -119,6 +121,10 @@ class MERTModel(HubertModel):
         extract_features = self.feature_extractor(input_values)
         extract_features = extract_features.transpose(1, 2)
 
+        print(f'after feature extractor + transpose = {extract_features.shape}')
+        frame = pd.DataFrame(extract_features[0].contiguous().numpy())
+        frame.to_csv("mert-py-features.csv", index=False)
+        
         # add additional cqt features for transformer input
         if self.config.feature_extractor_cqt:
             features_cqt = self.feature_extractor_cqt(input_values).transpose(1, 2)
@@ -135,6 +141,10 @@ class MERTModel(HubertModel):
 
         hidden_states = self.feature_projection(extract_features)
         hidden_states = self._mask_hidden_states(hidden_states, mask_time_indices=mask_time_indices)
+
+        print(f'after projection = {hidden_states.shape}')
+        frame = pd.DataFrame(hidden_states[0].numpy())
+        frame.to_csv("mert-py-projection.csv", index=False)
 
         encoder_outputs = self.encoder(
             hidden_states,
