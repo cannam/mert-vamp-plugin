@@ -1,13 +1,6 @@
 
-//#include <torch/data.h>
-//#include <torch/enum.h>
-
 #include <torch/nn.h>
 #include <torch/serialize.h>
-//#include <torch/types.h>
-//#include <torch/utils.h>
-
-//#include <torch/torch.h>
 
 #include <iostream>
 #include <fstream>
@@ -16,6 +9,9 @@
 
 using namespace std;
 using namespace torch;
+
+// For inference only - I've omitted some logic that I believe is only
+// used in training (dropout, certain types of masking)
 
 static const int64_t vocabSize { 32 };
 static const int64_t hiddenSize { 768 };
@@ -68,10 +64,6 @@ void dump(Tensor t, string filebase)
         }
     }
 }
-
-// important note: this is for inference only - I've omitted some
-// logic that I believe is only used in training (dropout, certain
-// types of masking)
 
 struct HubertNoLayerNormConvLayerImpl : LayerBase {
     nn::Conv1d conv = nullptr;
