@@ -8,7 +8,6 @@
 #include <sndfile.h>
 
 #include "withoutlib.cpp"
-#include "withoutlib2.cpp"
 
 using namespace std;
 using namespace torch;
@@ -42,31 +41,9 @@ localnn::Tensor localFromTorch(Tensor t)
          t.data_ptr<float>());
 }
 
-localnn2::Tensor local2FromTorch(Tensor t)
-{
-    t = t.to(kCPU);
-    return localnn2::fromData
-        (t.sizes().size(),
-         t.sizes().data(),
-         t.strides().data(),
-         t.data_ptr<float>());
-}
-
 Tensor torchFromLocal(localnn::Tensor t)
 {
     return torch::from_blob(t.data.data(), { t.sizes.data(), t.sizes.size() }).clone();
-}
-
-Tensor torchFromLocal2(localnn2::Tensor t)
-{
-    vector<int64_t> sizes;
-    auto data = localnn2::toData(t, sizes);
-    Tensor tt = torch::from_blob(data.data(), { sizes.data(), sizes.size() }).clone();
-    localnn2::Tensor check = local2FromTorch(tt);
-    if (check != t) {
-        throw std::runtime_error("check failed");
-    }
-    return tt;
 }
 
 void dump(Tensor t, string filebase)
@@ -84,53 +61,6 @@ void dump(Tensor t, string filebase)
     ofstream csv(filename);
 
     cerr << "will dump tensor of sizes " << t.sizes() << endl;
-
-    localnn2::Tensor tt = local2FromTorch(t);
-    localnn2::t_2 t2;
-    switch (localnn2::rank(tt)) {
-    case 1:
-        t2 = { std::get<localnn2::t_1>(tt) };
-        break;
-    case 2:
-        t2 = std::get<localnn2::t_2>(tt);
-        break;
-    case 3:
-        t2 = std::get<localnn2::t_3>(tt)[0];
-        break;
-    case 4:
-        t2 = std::get<localnn2::t_4>(tt)[0][0];
-        break;
-    default:
-        throw std::runtime_error("unsupported rank in dump");
-    }
-
-    int nrows = t2.size();
-    int ncols = t2[0].size();
-
-    cerr << "writing " << nrows << "-row " << ncols << "-column csv to "
-         << filename << endl;
-    
-    for (int j = 0; j < ncols; ++j) {
-        csv << j;
-        if (j + 1 < ncols) {
-            csv << ",";
-        } else {
-            csv << endl;
-        }
-    }
-    for (int i = 0; i < nrows; ++i) {
-        for (int j = 0; j < ncols; ++j) {
-            csv << t2.at(i).at(j);
-            if (j + 1 < ncols) {
-                csv << ",";
-            } else {
-                csv << endl;
-            }
-        }
-    }
-        
-     
-/*!!!
     localnn::Tensor tt = localFromTorch(t);
 
     int nrows = tt.sizes[1];
@@ -157,7 +87,6 @@ void dump(Tensor t, string filebase)
             }
         }
     }
-*/
     
 /*
     int nrows = t.sizes()[1];
@@ -185,55 +114,35 @@ void dump(Tensor t, string filebase)
 */
 }
 
-void localLinearImpl(const float *const __restrict__ in,
-                     const localnn::Tensor::ivec &insizes,
-                     const localnn::Tensor::ivec &instrides,
-                     float *const __restrict__ out,
-                     const localnn::Tensor::ivec &outsizes,
-                     const localnn::Tensor::ivec &outstrides,
+void localLinearImpl(const localnn::Tensor &in, int64_t inbase,
+                     localnn::Tensor &out, int64_t outbase,
                      const localnn::Tensor &weight,
                      const localnn::Tensor &bias,
                      int64_t rank,
                      int64_t rix)
 {
     if (rix + 1 == rank) {
-        if (instrides[rix] == 1 &&
-            outstrides[rix] == 1 &&
-            weight.strides[1] == 1) {
-            int64_t ws = weight.strides[0];
-            int64_t isize = insizes[rix];
-            for (int64_t j = 0; j < outsizes[rix]; ++j) {
-                float x = 0.f;
-                const float *const __restrict__ wbase =
-                    weight.data.data() + j * ws;
-                for (int64_t i = 0; i < isize; ++i) {
-                    x += wbase[i] * in[i];
-                }
-                x += bias.data[j];
-                out[j] = x;
+        const int64_t insize = in.sizes[rix];
+        const int64_t instride = in.strides[rix];
+        const int64_t outsize = out.sizes[rix];
+        const int64_t outstride = out.strides[rix];
+#pragma omp parallel for
+        for (int64_t j = 0; j < outsize; ++j) {
+            float x = 0.f;
+#pragma GCC ivdep
+            for (int64_t i = 0; i < insize; ++i) {
+                x += weight.at(j, i) * in.data[inbase + i * instride];
             }
-        } else {
-            cerr << "warning: slow" << endl;
-            for (int64_t i = 0; i < insizes[rix]; ++i) {
-                for (int64_t j = 0; j < outsizes[rix]; ++j) {
-                    out[j * outstrides[rix]] += weight.at(j, i) * in[i * instrides[rix]];
-                }
-            }
-            for (int64_t j = 0; j < outsizes[rix]; ++j) {
-                out[j * outstrides[rix]] += bias.at(j);
-            }
+            x += bias.at(j);
+            out.data[outbase + j * outstride] = x;
         }
     } else {
-        for (int rc = 0; rc < insizes[rix]; ++rc) {
-            localLinearImpl(in + rc * instrides[rix],
-                            insizes,
-                            instrides,
-                            out + rc * outstrides[rix],
-                            outsizes,
-                            outstrides,
+#pragma omp parallel for
+        for (int64_t i = 0; i < in.sizes[rix]; ++i) {
+            localLinearImpl(in, inbase + i * in.strides[rix],
+                            out, outbase + i * out.strides[rix],
                             weight, bias,
-                            rank,
-                            rix + 1);
+                            rank, rix + 1);
         }
     }
 }
@@ -250,93 +159,13 @@ Tensor localLinear(Tensor x, Tensor weight, Tensor bias)
     cerr << "new empty tensor: " << out << endl;
     int rix = 0;
     while (tx.sizes[rix] == 1) ++rix;
-    localLinearImpl(tx.data.data(),
-                    tx.sizes,
-                    tx.strides,
-                    out.data.data(),
-                    out.sizes,
-                    out.strides,
+    localLinearImpl(tx, 0,
+                    out, 0,
                     tw, tb,
                     rank, rix);
     auto result = torchFromLocal(out);
 //    dump(result, "tmp");
     return result;
-}
-
-localnn2::t_1 localLinear2Impl(const localnn2::t_1 &in,
-                               const localnn2::t_2 &w,
-                               const localnn2::t_1 &b)
-{
-    size_t in_size = in.size();
-    size_t out_size = w.size();
-    localnn2::t_1 out(out_size, 0.f);
-    for (size_t i = 0; i < in_size; ++i) {
-        for (size_t j = 0; j < out_size; ++j) {
-            out[j] += w[j][i] * in[i];
-        }
-    }
-    for (size_t j = 0; j < out_size; ++j) {
-        out[j] += b[j];
-    }
-    return out;
-}
-
-localnn2::t_2 localLinear2Impl_2(const localnn2::t_2 &in,
-                                 const localnn2::t_2 &w,
-                                 const localnn2::t_1 &b)
-{
-    localnn2::t_2 out;
-    for (auto t1 : in) {
-        out.push_back(localLinear2Impl(t1, w, b));
-    }
-    return out;
-}
-
-localnn2::t_3 localLinear2Impl_3(const localnn2::t_3 &in,
-                                 const localnn2::t_2 &w,
-                                 const localnn2::t_1 &b)
-{
-    localnn2::t_3 out;
-    for (auto t2 : in) {
-        out.push_back(localLinear2Impl_2(t2, w, b));
-    }
-    return out;
-}
-
-localnn2::t_4 localLinear2Impl_4(const localnn2::t_4 &in,
-                                 const localnn2::t_2 &w,
-                                 const localnn2::t_1 &b)
-{
-    localnn2::t_4 out;
-    for (auto t3 : in) {
-        out.push_back(localLinear2Impl_3(t3, w, b));
-    }
-    return out;
-}
-
-Tensor localLinear2(Tensor x, Tensor weight, Tensor bias)
-{
-    auto tx = local2FromTorch(x);
-    auto tw = std::get<localnn2::t_2>(local2FromTorch(weight));
-    auto tb = std::get<localnn2::t_1>(local2FromTorch(bias));
-    localnn2::Tensor result;
-    switch (localnn2::rank(tx)) {
-    case 1:
-        result = localLinear2Impl(std::get<localnn2::t_1>(tx), tw, tb);
-        break;
-    case 2:
-        result = localLinear2Impl_2(std::get<localnn2::t_2>(tx), tw, tb);
-        break;
-    case 3:
-        result = localLinear2Impl_3(std::get<localnn2::t_3>(tx), tw, tb);
-        break;
-    case 4:
-        result = localLinear2Impl_4(std::get<localnn2::t_4>(tx), tw, tb);
-        break;
-    default:
-        throw std::runtime_error("unsupported rank in localLinear2");
-    }
-    return torchFromLocal2(result);
 }
 
 struct LayerBase : nn::Module {
@@ -356,6 +185,24 @@ struct LayerBase : nn::Module {
     }
 };
 
+void localGelu(Tensor &tt)
+{
+    //!!! the fact that this .contiguous is necessary suggests we've
+    //!!! screwed up localFromTorch somehow
+    localnn::Tensor t = localFromTorch(tt.contiguous());
+
+    const double alpha = M_SQRT1_2;
+
+    for (int64_t i = 0; i < t.data.size(); ++i) {
+
+        double x = t.data[i];
+        x = x * 0.5 * (1.0 + std::erf(x * alpha));
+        t.data[i] = float(x);
+    }
+
+    tt = torchFromLocal(t);
+}
+
 struct HubertNoLayerNormConvLayerImpl : LayerBase {
     nn::Conv1d conv = nullptr;
 
@@ -372,7 +219,10 @@ struct HubertNoLayerNormConvLayerImpl : LayerBase {
     
     Tensor forwardImpl(Tensor x) override {
         x = conv(x);
-        x = gelu(x);
+
+//        x = gelu(x);
+        localGelu(x);
+        
         return x;
     }
 };
@@ -401,7 +251,10 @@ struct HubertGroupNormConvLayerImpl : LayerBase {
     Tensor forwardImpl(Tensor x) override {
         x = conv(x);
         x = layer_norm(x);
-        x = gelu(x);
+
+//        x = gelu(x);
+        localGelu(x);
+        
         return x;
     }
 };
@@ -507,7 +360,10 @@ struct HubertPositionalConvEmbeddingImpl : LayerBase {
         hidden_states = hidden_states.transpose(1, 2);
         hidden_states = conv(hidden_states);
         hidden_states = padding(hidden_states);
-        hidden_states = gelu(hidden_states);
+
+//        hidden_states = gelu(hidden_states);
+        localGelu(hidden_states);
+        
         hidden_states = hidden_states.transpose(1, 2);
         return hidden_states;
     }
@@ -627,7 +483,10 @@ struct HubertFeedForwardImpl : LayerBase {
     Tensor forwardImpl(Tensor hidden_states) {
 //        hidden_states = intermediate_dense(hidden_states);
         hidden_states = localLinear(hidden_states, intermediate_dense->weight, intermediate_dense->bias);
-        hidden_states = gelu(hidden_states);
+
+//        hidden_states = gelu(hidden_states);
+        localGelu(hidden_states);
+        
 //        hidden_states = output_dense(hidden_states);
         hidden_states = localLinear(hidden_states, output_dense->weight, output_dense->bias);
         return hidden_states;

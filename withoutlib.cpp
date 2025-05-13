@@ -46,19 +46,19 @@ struct Tensor {
         return acc;
     }        
 
-    float at(int64_t i) const {
+    inline float at(int64_t i) const {
         return data[i * strides[0]];
     }
 
-    float at(int64_t i, int64_t j) const {
+    inline float at(int64_t i, int64_t j) const {
         return data[i * strides[0] + j * strides[1]];
     }
 
-    float at(int64_t i, int64_t j, int64_t k) const {
+    inline float at(int64_t i, int64_t j, int64_t k) const {
         return data[i * strides[0] + j * strides[1] + k * strides[2]];
     }
 
-    float at(int64_t i, int64_t j, int64_t k, int64_t m) const {
+    inline float at(int64_t i, int64_t j, int64_t k, int64_t m) const {
         return data[i * strides[0] + j * strides[1] + k * strides[2] + m * strides[3]];
     }
 };
