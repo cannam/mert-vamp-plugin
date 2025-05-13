@@ -8,6 +8,7 @@
 #include <sndfile.h>
 
 #include "withoutlib.cpp"
+#include "withoutlib2.cpp"
 
 using namespace std;
 using namespace torch;
@@ -41,9 +42,31 @@ localnn::Tensor localFromTorch(Tensor t)
          t.data_ptr<float>());
 }
 
+localnn2::Tensor local2FromTorch(Tensor t)
+{
+    t = t.to(kCPU);
+    return localnn2::fromData
+        (t.sizes().size(),
+         t.sizes().data(),
+         t.strides().data(),
+         t.data_ptr<float>());
+}
+
 Tensor torchFromLocal(localnn::Tensor t)
 {
-    return torch::from_blob(t.data.data(), { t.sizes.data(), t.sizes.size() });
+    return torch::from_blob(t.data.data(), { t.sizes.data(), t.sizes.size() }).clone();
+}
+
+Tensor torchFromLocal2(localnn2::Tensor t)
+{
+    vector<int64_t> sizes;
+    auto data = localnn2::toData(t, sizes);
+    Tensor tt = torch::from_blob(data.data(), { sizes.data(), sizes.size() }).clone();
+    localnn2::Tensor check = local2FromTorch(tt);
+    if (check != t) {
+        throw std::runtime_error("check failed");
+    }
+    return tt;
 }
 
 void dump(Tensor t, string filebase)
@@ -60,6 +83,54 @@ void dump(Tensor t, string filebase)
     string filename = filebase + ".csv";
     ofstream csv(filename);
 
+    cerr << "will dump tensor of sizes " << t.sizes() << endl;
+
+    localnn2::Tensor tt = local2FromTorch(t);
+    localnn2::t_2 t2;
+    switch (localnn2::rank(tt)) {
+    case 1:
+        t2 = { std::get<localnn2::t_1>(tt) };
+        break;
+    case 2:
+        t2 = std::get<localnn2::t_2>(tt);
+        break;
+    case 3:
+        t2 = std::get<localnn2::t_3>(tt)[0];
+        break;
+    case 4:
+        t2 = std::get<localnn2::t_4>(tt)[0][0];
+        break;
+    default:
+        throw std::runtime_error("unsupported rank in dump");
+    }
+
+    int nrows = t2.size();
+    int ncols = t2[0].size();
+
+    cerr << "writing " << nrows << "-row " << ncols << "-column csv to "
+         << filename << endl;
+    
+    for (int j = 0; j < ncols; ++j) {
+        csv << j;
+        if (j + 1 < ncols) {
+            csv << ",";
+        } else {
+            csv << endl;
+        }
+    }
+    for (int i = 0; i < nrows; ++i) {
+        for (int j = 0; j < ncols; ++j) {
+            csv << t2.at(i).at(j);
+            if (j + 1 < ncols) {
+                csv << ",";
+            } else {
+                csv << endl;
+            }
+        }
+    }
+        
+     
+/*!!!
     localnn::Tensor tt = localFromTorch(t);
 
     int nrows = tt.sizes[1];
@@ -86,7 +157,7 @@ void dump(Tensor t, string filebase)
             }
         }
     }
- 
+*/
     
 /*
     int nrows = t.sizes()[1];
@@ -147,6 +218,82 @@ void localLinearImpl(const float *in,
                             rix + 1);
         }
     }
+}
+
+localnn2::t_1 localLinear2Impl(const localnn2::t_1 &in,
+                               const localnn2::t_2 &w,
+                               const localnn2::t_1 &b)
+{
+    size_t in_size = in.size();
+    size_t out_size = w.size();
+    localnn2::t_1 out(out_size, 0.f);
+    for (size_t i = 0; i < in_size; ++i) {
+        for (size_t j = 0; j < out_size; ++j) {
+            out[j] += w[j][i] * in[i];
+        }
+    }
+    for (size_t j = 0; j < out_size; ++j) {
+        out[j] += b[j];
+    }
+    return out;
+}
+
+localnn2::t_2 localLinear2Impl_2(const localnn2::t_2 &in,
+                                 const localnn2::t_2 &w,
+                                 const localnn2::t_1 &b)
+{
+    localnn2::t_2 out;
+    for (auto t1 : in) {
+        out.push_back(localLinear2Impl(t1, w, b));
+    }
+    return out;
+}
+
+localnn2::t_3 localLinear2Impl_3(const localnn2::t_3 &in,
+                                 const localnn2::t_2 &w,
+                                 const localnn2::t_1 &b)
+{
+    localnn2::t_3 out;
+    for (auto t2 : in) {
+        out.push_back(localLinear2Impl_2(t2, w, b));
+    }
+    return out;
+}
+
+localnn2::t_4 localLinear2Impl_4(const localnn2::t_4 &in,
+                                 const localnn2::t_2 &w,
+                                 const localnn2::t_1 &b)
+{
+    localnn2::t_4 out;
+    for (auto t3 : in) {
+        out.push_back(localLinear2Impl_3(t3, w, b));
+    }
+    return out;
+}
+
+Tensor localLinear2(Tensor x, Tensor weight, Tensor bias)
+{
+    auto tx = local2FromTorch(x);
+    auto tw = std::get<localnn2::t_2>(local2FromTorch(weight));
+    auto tb = std::get<localnn2::t_1>(local2FromTorch(bias));
+    localnn2::Tensor result;
+    switch (localnn2::rank(tx)) {
+    case 1:
+        result = localLinear2Impl(std::get<localnn2::t_1>(tx), tw, tb);
+        break;
+    case 2:
+        result = localLinear2Impl_2(std::get<localnn2::t_2>(tx), tw, tb);
+        break;
+    case 3:
+        result = localLinear2Impl_3(std::get<localnn2::t_3>(tx), tw, tb);
+        break;
+    case 4:
+        result = localLinear2Impl_4(std::get<localnn2::t_4>(tx), tw, tb);
+        break;
+    default:
+        throw std::runtime_error("unsupported rank in localLinear2");
+    }
+    return torchFromLocal2(result);
 }
 
 Tensor localLinear(Tensor x, Tensor weight, Tensor bias)
@@ -287,7 +434,7 @@ struct MERTFeatureProjectionImpl : LayerBase {
     Tensor forwardImpl(Tensor x) {
         x = layer_norm(x);
 //        x = linear(x);
-        x = localLinear(x, linear->weight, linear->bias);
+        x = localLinear2(x, linear->weight, linear->bias);
         return x;
     }
         
