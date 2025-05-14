@@ -237,7 +237,6 @@ Tensor localConv1d(Tensor tt, int64_t ch_in, int64_t ch_out, int64_t ksize,
     for (int64_t b = 0; b < t.sizes[0]; ++b) {
 #pragma omp parallel for
         for (int64_t c = 0; c < ch_out; ++c) {
-//            std::cerr << c << " ";
             for (int64_t k = 0; k < ch_in; ++k) {
 
                 const float *const wbase =
@@ -247,17 +246,14 @@ Tensor localConv1d(Tensor tt, int64_t ch_in, int64_t ch_out, int64_t ksize,
                 float *const outbase =
                     out.data.data() + b * out.strides[0] + c * out.strides[1];
 
-                for (int64_t x = 0; x < l_out; ++x) {
-                    double acc = 0.f;
 #pragma GCC ivdep
-                    for (int64_t i = 0; i < ksize; ++i) {
-                        acc += wbase[i] * tbase[x * stride + i];
+                for (int64_t i = 0; i < ksize; ++i) {
+                    for (int64_t x = 0; x < l_out; ++x) {
+                        outbase[x] += wbase[i] * tbase[x * stride + i];
                     }
-                    outbase[x] += acc;
                 }
             }
         }
-//        std::cerr << std::endl;
     }
             
     return torchFromLocal(out);
