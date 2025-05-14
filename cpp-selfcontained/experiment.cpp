@@ -299,10 +299,13 @@ struct HubertNoLayerNormConvLayerImpl : LayerBase {
 TORCH_MODULE(HubertNoLayerNormConvLayer);
 
 struct HubertGroupNormConvLayerImpl : LayerBase {
+
+    int64_t layerId = 0;
     nn::Conv1d conv = nullptr;
     nn::GroupNorm layer_norm = nullptr;
     
-    HubertGroupNormConvLayerImpl(int64_t layerId) {
+    HubertGroupNormConvLayerImpl(int64_t layerId_) {
+        layerId = layerId_;
         int64_t inSize = 1;
         if (layerId > 0) inSize = convDimensions[layerId-1];
         int64_t outSize = convDimensions[layerId];
@@ -318,7 +321,14 @@ struct HubertGroupNormConvLayerImpl : LayerBase {
     }
     
     Tensor forwardImpl(Tensor x) override {
-        x = conv(x);
+
+        int64_t inSize = 1;
+        if (layerId > 0) inSize = convDimensions[layerId-1];
+        int64_t outSize = convDimensions[layerId];
+        x = localConv1d(x, inSize, outSize, convKernels[layerId],
+                        convStrides[layerId], 0, 1, conv->weight, nullptr);
+
+//        x = conv(x);
         x = layer_norm(x);
 
 //        x = gelu(x);
