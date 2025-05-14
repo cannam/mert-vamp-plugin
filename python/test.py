@@ -14,7 +14,7 @@ from modeling_MERT import *
 config = MERTConfig()
 model = MERTModel(config)
 
-dict=torch.load('pytorch_model.bin')
+dict=torch.load('../data/pytorch_model.bin')
 model.load_state_dict(dict)
 summary(model)
 
@@ -22,7 +22,7 @@ parametrize.remove_parametrizations(model.encoder.pos_conv_embed.conv, 'weight')
 summary(model)
 
 w = { k : v for k, v in model.state_dict().items() }
-torch.save(w, 'for_libtorch.pth')
+torch.save(w, '../data/for_libtorch.pth')
 
 print('keys are:')
 print(model.state_dict().keys())
@@ -35,7 +35,7 @@ print(model)
 #scripted_model.save("scripted_model.pt")
 
 #audio, file_rate = librosa.load('stairway-intro-16k-mono.wav', sr = 16000, mono = True)
-audio, file_rate = librosa.load('gerudo.wav', sr = 16000, mono = True)
+audio, file_rate = librosa.load('../data/gerudo.wav', sr = 16000, mono = True)
 t_audio = torch.from_numpy(np.array([audio]))
 
 with torch.no_grad():
