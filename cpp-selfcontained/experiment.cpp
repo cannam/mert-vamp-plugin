@@ -208,12 +208,12 @@ Tensor localConv1d(Tensor tt, int64_t ch_in, int64_t ch_out, int64_t ksize,
                    Tensor weightt, Tensor *biasp)
 {
     localnn::Tensor t = localFromTorch(tt.contiguous());
-    localnn::Tensor weight = localFromTorch(weightt);
+    localnn::Tensor w = localFromTorch(weightt);
 
     if (t.rank != 3 || t.strides[2] != 1) {
         throw std::runtime_error("unsupported format for input");
     }
-    if (weight.rank != 3 || weight.strides[2] != 1) {
+    if (w.rank != 3 || w.strides[2] != 1) {
         throw std::runtime_error("unsupported format for weight");
     }
     
@@ -234,6 +234,13 @@ Tensor localConv1d(Tensor tt, int64_t ch_in, int64_t ch_out, int64_t ksize,
     // out     1, 512, big
     // weight  512, 512, 3
 
+    const float *const wdata = w.data.data();
+    int64_t wstride_c = w.strides[0];
+    int64_t wstride_k = w.strides[1];
+    const float *const tdata = t.data.data();
+    int64_t tstride_b = t.strides[0];
+    int64_t tstride_k = t.strides[1];
+
     for (int64_t b = 0; b < t.sizes[0]; ++b) {
 #pragma omp parallel for
         for (int64_t c = 0; c < ch_out; ++c) {
@@ -243,8 +250,8 @@ Tensor localConv1d(Tensor tt, int64_t ch_in, int64_t ch_out, int64_t ksize,
                 for (int64_t k = 0; k < ch_in; ++k) {
 #pragma GCC ivdep
                     for (int64_t i = 0; i < ksize; ++i) {
-                        acc += weight.at(c, k, i) *
-                            t.at(b, k, x * stride + i);
+                        acc += wdata[c * wstride_c + k * wstride_k + i] *
+                            tdata[b * tstride_b + k * tstride_k + (x * stride + i)];
                     }
                 }
                 out.set(b, c, x, acc);
