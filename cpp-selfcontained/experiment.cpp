@@ -234,30 +234,30 @@ Tensor localConv1d(Tensor tt, int64_t ch_in, int64_t ch_out, int64_t ksize,
     // out     1, 512, big
     // weight  512, 512, 3
 
-    const float *const wdata = w.data.data();
-    int64_t wstride_c = w.strides[0];
-    int64_t wstride_k = w.strides[1];
-    const float *const tdata = t.data.data();
-    int64_t tstride_b = t.strides[0];
-    int64_t tstride_k = t.strides[1];
-
     for (int64_t b = 0; b < t.sizes[0]; ++b) {
 #pragma omp parallel for
         for (int64_t c = 0; c < ch_out; ++c) {
-            std::cerr << c << " ";
-            for (int64_t x = 0; x < l_out; ++x) {
-                double acc = 0.f;
-                for (int64_t k = 0; k < ch_in; ++k) {
+//            std::cerr << c << " ";
+            for (int64_t k = 0; k < ch_in; ++k) {
+
+                const float *const wbase =
+                    w.data.data() + c * w.strides[0] + k * w.strides[1];
+                const float *const tbase =
+                    t.data.data() + b * t.strides[0] + k * t.strides[1];
+                float *const outbase =
+                    out.data.data() + b * out.strides[0] + c * out.strides[1];
+
+                for (int64_t x = 0; x < l_out; ++x) {
+                    double acc = 0.f;
 #pragma GCC ivdep
                     for (int64_t i = 0; i < ksize; ++i) {
-                        acc += wdata[c * wstride_c + k * wstride_k + i] *
-                            tdata[b * tstride_b + k * tstride_k + (x * stride + i)];
+                        acc += wbase[i] * tbase[x * stride + i];
                     }
+                    outbase[x] += acc;
                 }
-                out.set(b, c, x, acc);
             }
         }
-        std::cerr << std::endl;
+//        std::cerr << std::endl;
     }
             
     return torchFromLocal(out);
@@ -280,19 +280,19 @@ struct HubertNoLayerNormConvLayerImpl : LayerBase {
     }
     
     Tensor forwardImpl(Tensor x) override {
-        Tensor y = conv(x);
+//        Tensor y = conv(x);
 
         int64_t inSize = 1;
         if (layerId > 0) inSize = convDimensions[layerId-1];
         int64_t outSize = convDimensions[layerId];
         x = localConv1d(x, inSize, outSize, convKernels[layerId],
                         convStrides[layerId], 0, 1, conv->weight, nullptr);
-
+/*!!!
         dump(y, "conv-torch");
         dump(x, "conv-local");
         dump(y - x, "conv-diff");
         exit(2);
-        
+*/        
 //        x = gelu(x);
         localGelu(x);
         

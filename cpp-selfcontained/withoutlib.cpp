@@ -84,6 +84,7 @@ struct Tensor {
         data[i * strides[0] + j * strides[1] + k * strides[2]] = v;
     }
     inline void add(int64_t i, int64_t j, int64_t k, float v) {
+        /*
         if (rank != 3) {
             std::cerr << "error: wrong rank (" << rank << ") for 3-arg update" << std::endl;
             throw std::runtime_error("shape");
@@ -100,6 +101,7 @@ struct Tensor {
             std::cerr << "error: k out of range (is " << k << ", max = " << sizes[2] << ")" << std::endl;
             throw std::runtime_error("shape");
         }
+        */
         data[i * strides[0] + j * strides[1] + k * strides[2]] += v;
     }
 };
