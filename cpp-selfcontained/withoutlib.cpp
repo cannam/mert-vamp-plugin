@@ -55,11 +55,52 @@ struct Tensor {
     }
 
     inline float at(int64_t i, int64_t j, int64_t k) const {
+/*!!!
+        if (rank != 3) {
+            std::cerr << "at: error: wrong rank (" << rank << ") for 3-arg index" << std::endl;
+            throw std::runtime_error("shape");
+        }
+        if (i < 0 || i > sizes[0]) {
+            std::cerr << "at: error: i out of range (is " << i << ", max = " << sizes[0] << ")" << std::endl;
+            throw std::runtime_error("shape");
+        }
+        if (j < 0 || j > sizes[1]) {
+            std::cerr << "at: error: j out of range (is " << j << ", max = " << sizes[1] << ")" << std::endl;
+            throw std::runtime_error("shape");
+        }
+        if (k < 0 || k > sizes[2]) {
+            std::cerr << "at: error: k out of range (is " << k << ", max = " << sizes[2] << ")" << std::endl;
+            throw std::runtime_error("shape");
+        }
+*/
         return data[i * strides[0] + j * strides[1] + k * strides[2]];
     }
 
     inline float at(int64_t i, int64_t j, int64_t k, int64_t m) const {
         return data[i * strides[0] + j * strides[1] + k * strides[2] + m * strides[3]];
+    }
+
+    inline void set(int64_t i, int64_t j, int64_t k, float v) {
+        data[i * strides[0] + j * strides[1] + k * strides[2]] = v;
+    }
+    inline void add(int64_t i, int64_t j, int64_t k, float v) {
+        if (rank != 3) {
+            std::cerr << "error: wrong rank (" << rank << ") for 3-arg update" << std::endl;
+            throw std::runtime_error("shape");
+        }
+        if (i < 0 || i > sizes[0]) {
+            std::cerr << "error: i out of range (is " << i << ", max = " << sizes[0] << ")" << std::endl;
+            throw std::runtime_error("shape");
+        }
+        if (j < 0 || j > sizes[1]) {
+            std::cerr << "error: j out of range (is " << j << ", max = " << sizes[1] << ")" << std::endl;
+            throw std::runtime_error("shape");
+        }
+        if (k < 0 || k > sizes[2]) {
+            std::cerr << "error: k out of range (is " << k << ", max = " << sizes[2] << ")" << std::endl;
+            throw std::runtime_error("shape");
+        }
+        data[i * strides[0] + j * strides[1] + k * strides[2]] += v;
     }
 };
     

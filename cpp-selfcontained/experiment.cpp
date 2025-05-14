@@ -203,10 +203,65 @@ void localGelu(Tensor &tt)
     tt = torchFromLocal(t);
 }
 
+Tensor localConv1d(Tensor tt, int64_t ch_in, int64_t ch_out, int64_t ksize,
+                   int64_t stride, int64_t padding, int64_t groups,
+                   Tensor weightt, Tensor *biasp)
+{
+    localnn::Tensor t = localFromTorch(tt.contiguous());
+    localnn::Tensor weight = localFromTorch(weightt);
+
+    if (t.rank != 3 || t.strides[2] != 1) {
+        throw std::runtime_error("unsupported format for input");
+    }
+    if (weight.rank != 3 || weight.strides[2] != 1) {
+        throw std::runtime_error("unsupported format for weight");
+    }
+    
+    // batchsize * inchannels * inlength -> batchsize * outchannels * outlength
+
+    if (t.rank != 3 || padding != 0 || groups > 1 || biasp) {
+        throw std::runtime_error("unimplemented");
+    }
+
+    int64_t l_in = t.sizes[2];
+    int64_t l_out = (l_in + 2 * padding - (ksize - 1) - 1) / stride + 1;
+
+    cerr << "l_in = " << l_in << ", l_out = " << l_out << endl;
+    
+    localnn::Tensor out = localnn::Tensor::empty({ t.sizes[0], ch_out, l_out });
+
+    // in      1, 512, bigger
+    // out     1, 512, big
+    // weight  512, 512, 3
+
+    for (int64_t b = 0; b < t.sizes[0]; ++b) {
+#pragma omp parallel for
+        for (int64_t c = 0; c < ch_out; ++c) {
+            std::cerr << c << " ";
+            for (int64_t x = 0; x < l_out; ++x) {
+                double acc = 0.f;
+                for (int64_t k = 0; k < ch_in; ++k) {
+#pragma GCC ivdep
+                    for (int64_t i = 0; i < ksize; ++i) {
+                        acc += weight.at(c, k, i) *
+                            t.at(b, k, x * stride + i);
+                    }
+                }
+                out.set(b, c, x, acc);
+            }
+        }
+        std::cerr << std::endl;
+    }
+            
+    return torchFromLocal(out);
+}
+
 struct HubertNoLayerNormConvLayerImpl : LayerBase {
+    int64_t layerId = 0;
     nn::Conv1d conv = nullptr;
 
-    HubertNoLayerNormConvLayerImpl(int64_t layerId) {
+    HubertNoLayerNormConvLayerImpl(int64_t layerId_) {
+        layerId = layerId_;
         int64_t inSize = 1;
         if (layerId > 0) inSize = convDimensions[layerId-1];
         int64_t outSize = convDimensions[layerId];
@@ -218,8 +273,19 @@ struct HubertNoLayerNormConvLayerImpl : LayerBase {
     }
     
     Tensor forwardImpl(Tensor x) override {
-        x = conv(x);
+        Tensor y = conv(x);
 
+        int64_t inSize = 1;
+        if (layerId > 0) inSize = convDimensions[layerId-1];
+        int64_t outSize = convDimensions[layerId];
+        x = localConv1d(x, inSize, outSize, convKernels[layerId],
+                        convStrides[layerId], 0, 1, conv->weight, nullptr);
+
+        dump(y, "conv-torch");
+        dump(x, "conv-local");
+        dump(y - x, "conv-diff");
+        exit(2);
+        
 //        x = gelu(x);
         localGelu(x);
         
@@ -606,7 +672,7 @@ int main(int argc, char **argv)
         cerr << i.key() << endl;
     }
 
-    ifstream saved("for_libtorch.pth", ios::binary);
+    ifstream saved("../data/for_libtorch.pth", ios::binary);
     saved.seekg(0, ios::end);
     auto size = saved.tellg();
     saved.seekg(0, ios::beg);
@@ -648,7 +714,7 @@ int main(int argc, char **argv)
     }
 
 //    string testfile = "stairway-intro-16k-mono.wav";
-    string testfile = "gerudo.wav";
+    string testfile = "../data/gerudo.wav";
     
     SF_INFO sfinfo;
     SNDFILE *sf = sf_open(testfile.c_str(), SFM_READ, &sfinfo);
