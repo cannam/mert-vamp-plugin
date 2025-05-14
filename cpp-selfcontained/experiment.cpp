@@ -227,29 +227,44 @@ Tensor localConv1d(Tensor tt, int64_t ch_in, int64_t ch_out, int64_t ksize,
     int64_t l_out = (l_in + 2 * padding - (ksize - 1) - 1) / stride + 1;
 
     cerr << "l_in = " << l_in << ", l_out = " << l_out << endl;
-    
-    localnn::Tensor out = localnn::Tensor::empty({ t.sizes[0], ch_out, l_out });
 
-    // in      1, 512, bigger
-    // out     1, 512, big
-    // weight  512, 512, 3
+    localnn::Tensor out = localnn::Tensor::empty({ t.sizes[0], ch_out, l_out });
+    
+    localnn::Tensor bias;
+    float *bbase = nullptr;
+    if (biasp) {
+        bias = localFromTorch(*biasp);
+        bbase = bias.data.data();
+    }
 
     for (int64_t b = 0; b < t.sizes[0]; ++b) {
+        for (int64_t g = 0; g < groups; ++g) {
+            int c0 = g * (ch_out / groups);
+            int k0 = g * (ch_in / groups);
+            int g0 = g * (out.numel() / groups);
 #pragma omp parallel for
-        for (int64_t c = 0; c < ch_out; ++c) {
-            for (int64_t k = 0; k < ch_in; ++k) {
+            for (int64_t c = 0; c < ch_out / groups; ++c) {
 
-                const float *const wbase =
-                    w.data.data() + c * w.strides[0] + k * w.strides[1];
-                const float *const tbase =
-                    t.data.data() + b * t.strides[0] + k * t.strides[1];
                 float *const outbase =
-                    out.data.data() + b * out.strides[0] + c * out.strides[1];
+                    out.data.data() + out.index(g0 + b, c);
 
+                for (int64_t k = 0; k < ch_in / groups; ++k) {
+                    const float *const wbase =
+                        w.data.data() + w.index(c + c0, k + k0);
+                    const float *const tbase =
+                        t.data.data() + t.index(b, k + k0);
 #pragma GCC ivdep
-                for (int64_t i = 0; i < ksize; ++i) {
+                    for (int64_t i = 0; i < ksize; ++i) {
+                        for (int64_t x = 0; x < l_out; ++x) {
+                            outbase[x] += wbase[i] * tbase[x * stride + i];
+                        }
+                    }
+                }
+
+                if (bbase) {
+#pragma GCC ivdep
                     for (int64_t x = 0; x < l_out; ++x) {
-                        outbase[x] += wbase[i] * tbase[x * stride + i];
+                        outbase[x] += bbase[c + c0];
                     }
                 }
             }
