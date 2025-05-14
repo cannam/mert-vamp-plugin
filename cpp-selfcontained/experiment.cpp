@@ -207,6 +207,10 @@ Tensor localConv1d(Tensor tt, int64_t ch_in, int64_t ch_out, int64_t ksize,
                    int64_t stride, int64_t padding, int64_t groups,
                    Tensor weightt, Tensor *biasp)
 {
+    cerr << "in shape = " << tt.sizes() << endl;
+    cerr << "weight shape = " << weightt.sizes() << endl;
+    cerr << "groups = " << groups << endl;
+    
     localnn::Tensor t = localFromTorch(tt.contiguous());
     localnn::Tensor w = localFromTorch(weightt);
 
@@ -218,10 +222,6 @@ Tensor localConv1d(Tensor tt, int64_t ch_in, int64_t ch_out, int64_t ksize,
     }
     
     // batchsize * inchannels * inlength -> batchsize * outchannels * outlength
-
-    if (t.rank != 3 || padding != 0 || groups > 1 || biasp) {
-        throw std::runtime_error("unimplemented");
-    }
 
     int64_t l_in = t.sizes[2];
     int64_t l_out = (l_in + 2 * padding - (ksize - 1) - 1) / stride + 1;
@@ -241,22 +241,31 @@ Tensor localConv1d(Tensor tt, int64_t ch_in, int64_t ch_out, int64_t ksize,
         for (int64_t g = 0; g < groups; ++g) {
             int c0 = g * (ch_out / groups);
             int k0 = g * (ch_in / groups);
-            int g0 = g * (out.numel() / groups);
+            int g0 = g * ((out.numel() / t.sizes[0]) / groups);
 #pragma omp parallel for
             for (int64_t c = 0; c < ch_out / groups; ++c) {
 
                 float *const outbase =
-                    out.data.data() + out.index(g0 + b, c);
+                    out.data.data() + g0 + out.index(b, c);
 
                 for (int64_t k = 0; k < ch_in / groups; ++k) {
                     const float *const wbase =
-                        w.data.data() + w.index(c + c0, k + k0);
+                        w.data.data() + w.index(c + c0, k);
                     const float *const tbase =
                         t.data.data() + t.index(b, k + k0);
 #pragma GCC ivdep
                     for (int64_t i = 0; i < ksize; ++i) {
-                        for (int64_t x = 0; x < l_out; ++x) {
-                            outbase[x] += wbase[i] * tbase[x * stride + i];
+                        if (padding == 0) {
+                            for (int64_t x = 0; x < l_out; ++x) {
+                                outbase[x] += wbase[i] * tbase[x * stride + i];
+                            }
+                        } else {
+                            // ew
+                            for (int64_t x = 0; x < l_out; ++x) {
+                                int64_t x0 = x * stride + i - padding;
+                                if (x0 < 0 || x0 >= l_in) continue;
+                                outbase[x] += wbase[i] * tbase[x0];
+                            }
                         }
                     }
                 }
@@ -271,7 +280,9 @@ Tensor localConv1d(Tensor tt, int64_t ch_in, int64_t ch_out, int64_t ksize,
         }
     }
             
-    return torchFromLocal(out);
+    Tensor result = torchFromLocal(out);
+    cerr << "out shape = " << result.sizes() << endl;
+    return result;
 }
 
 struct HubertNoLayerNormConvLayerImpl : LayerBase {
@@ -452,7 +463,14 @@ struct HubertPositionalConvEmbeddingImpl : LayerBase {
 
     Tensor forwardImpl(Tensor hidden_states) {
         hidden_states = hidden_states.transpose(1, 2);
-        hidden_states = conv(hidden_states);
+
+//        hidden_states = conv(hidden_states);
+        hidden_states = localConv1d(hidden_states, hiddenSize, hiddenSize,
+                                    nConvPosEmbeddings, 1, nConvPosEmbeddings/2,
+                                    nConvPosEmbeddingGroups,
+                                    conv->weight,
+                                    &conv->bias);
+
         hidden_states = padding(hidden_states);
 
 //        hidden_states = gelu(hidden_states);
