@@ -301,7 +301,8 @@ Tensor localConv1d(Tensor tt, int64_t ch_in, int64_t ch_out, int64_t ksize,
     return result;
 }
 
-void localLayerNorm(Tensor &tt, Tensor weightt, Tensor biast)
+void localLayerNorm(Tensor &tt, Tensor weightt, Tensor biast,
+                    bool weightsPerInstance)
 {
     // Fixed to last dimension
     localnn::Tensor t = localFromTorch(tt.contiguous());
@@ -312,7 +313,7 @@ void localLayerNorm(Tensor &tt, Tensor weightt, Tensor biast)
     int64_t n = t.numel();
     int64_t j = 0;
 
-    cerr << "h = " << h << endl;
+    cerr << "h = " << h << ", have " << weight.sizes[0] << " weights" << endl;
 
     while (j < n) {
 
@@ -334,18 +335,19 @@ void localLayerNorm(Tensor &tt, Tensor weightt, Tensor biast)
         double sd = sqrt(variance + eps);
             
         for (int i = 0; i < h; ++i) {
+
             double x = base[i];
             double y = (x - mean) / sd;
 
-//            if (j == 0) {
-//                cout << i << ". (" << x << " - " << mean << ") / " << sd << " -> " << y << "; ";
-//            }
-
-            y = y * weight.at(i) + bias.at(i);
-
-//            if (j == 0) {
-//                cout << "* " << weight.at(i) << " + " << bias.at(i) << " = " << y << (fabs(y) > 1.0 ? " ***" : "") << endl;
-//            }
+            if (weightsPerInstance) {
+                // This case is for where the original model uses a
+                // GroupNorm layer. The GroupNorm is supplied with
+                // groups == channels so is actually performing an
+                // instance norm
+                y = y * weight.at(j / h) + bias.at(j / h);
+            } else {
+                y = y * weight.at(i) + bias.at(i);
+            }                
 
             base[i] = y;
         }
@@ -427,9 +429,14 @@ struct HubertGroupNormConvLayerImpl : LayerBase {
 
 //        x = conv(x);
 
+        cerr << "sizes on input to group norm: " << x.sizes() << endl;
+        
         //!!! group norm
-        x = layer_norm(x);
+//        x = layer_norm(x);
+//        localLayerNorm(x, layer_norm->weight, layer_norm->bias);
 
+        localLayerNorm(x, layer_norm->weight, layer_norm->bias, true);
+        
 //        x = gelu(x);
         localGelu(x);
         
@@ -484,7 +491,7 @@ struct MERTFeatureProjectionImpl : LayerBase {
 
     Tensor forwardImpl(Tensor x) {
 //        x = layer_norm(x);
-        localLayerNorm(x, layer_norm->weight, layer_norm->bias);
+        localLayerNorm(x, layer_norm->weight, layer_norm->bias, false);
 //        x = linear(x);
         x = localLinear(x, linear->weight, linear->bias);
         return x;
@@ -738,7 +745,8 @@ struct HubertEncoderImpl : nn::Module {
 
         hidden_states = hidden_states + position_embeddings;
 
-        localLayerNorm(hidden_states, layer_norm->weight, layer_norm->bias);
+        localLayerNorm(hidden_states, layer_norm->weight, layer_norm->bias,
+                       false);
         
         vector<Tensor> all_hidden_states;
         all_hidden_states.push_back(hidden_states);
