@@ -358,6 +358,43 @@ void localLayerNorm(Tensor &tt, Tensor weightt, Tensor biast,
     tt = torchFromLocal(t);
 }
 
+Tensor localBMM(Tensor tt, Tensor mt)
+{
+    localnn::Tensor t = localFromTorch(tt.contiguous());
+    localnn::Tensor m = localFromTorch(mt.contiguous());
+
+    if (t.rank != 3 || m.rank != 3) {
+        cerr << "unsupported rank (" << t.rank << " or "
+             << m.rank << ", should both be 3)" << endl;
+        throw std::runtime_error("shape");
+    }        
+    
+    localnn::Tensor out = localnn::Tensor::empty
+        ({ t.sizes[0], t.sizes[1], m.sizes[2] });
+
+    if (t.sizes[2] != m.sizes[1]) {
+        cerr << "incompatible sizes (" << t.sizes[2] << " != "
+             << m.sizes[1] << ")" << endl;
+        throw std::runtime_error("shape");
+    }
+    
+    for (int b = 0; b < t.sizes[0]; ++b) {
+#pragma omp parallel for
+        for (int i = 0; i < t.sizes[1]; ++i) {
+            for (int j = 0; j < m.sizes[2]; ++j) {
+                double d = 0.0;
+#pragma GCC ivdep
+                for (int k = 0; k < m.sizes[1]; ++k) {
+                    d += t.at(b, i, k) * m.at(b, k, j);
+                }
+                out.data[out.index(b, i, j)] = d;
+            }
+        }
+    }
+
+    return torchFromLocal(out);
+}
+
 struct HubertNoLayerNormConvLayerImpl : LayerBase {
     int64_t layerId = 0;
     nn::Conv1d conv = nullptr;
@@ -616,7 +653,7 @@ struct HubertAttentionImpl : LayerBase {
              << ", v' = " << value_states.sizes() << endl;
 
         int64_t src_len = key_states.sizes()[1];
-        Tensor attn_weights = bmm(query_states, key_states.transpose(1, 2));
+        Tensor attn_weights = localBMM(query_states, key_states.transpose(1, 2));
 
         vector<int64_t> expected { bsz * num_heads, tgt_len, src_len };
         if (attn_weights.sizes() != expected) {
@@ -628,7 +665,7 @@ struct HubertAttentionImpl : LayerBase {
         
         attn_weights = softmax(attn_weights, -1);
 
-        Tensor attn_output = bmm(attn_weights, value_states);
+        Tensor attn_output = localBMM(attn_weights, value_states);
         
         expected = { bsz * num_heads, tgt_len, head_dim };
         if (attn_output.sizes() != expected) {
