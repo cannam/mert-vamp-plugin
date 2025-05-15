@@ -1,6 +1,5 @@
 #!/usr/bin/env python
 
-from transformers import Wav2Vec2FeatureExtractor
 import torch
 from torch import nn
 import numpy as np

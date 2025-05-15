@@ -4,3 +4,4 @@ pytorch_model.bin
 __pycache__
 *~
 *.rej
+data/

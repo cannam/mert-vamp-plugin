@@ -10,8 +10,6 @@ from transformers.modeling_outputs import BaseModelOutput
 import torch
 from torch import nn
 
-import pandas as pd
-
 from modeling_hubert import (
     HubertFeatureEncoder,
     HubertModel,
