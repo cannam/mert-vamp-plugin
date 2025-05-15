@@ -710,11 +710,19 @@ struct HubertEncoderLayerImpl : LayerBase {
 
     Tensor forwardImpl(Tensor hidden_states) {
         Tensor attn_residual = hidden_states;
+
         hidden_states = attention(hidden_states);
+
         hidden_states = attn_residual + hidden_states;
-        hidden_states = layer_norm(hidden_states);
+
+//        hidden_states = layer_norm(hidden_states);
+        localLayerNorm(hidden_states, layer_norm->weight, layer_norm->bias, false);
+
         hidden_states = hidden_states + feed_forward(hidden_states);
-        hidden_states = final_layer_norm(hidden_states);
+
+        //hidden_states = final_layer_norm(hidden_states);
+        localLayerNorm(hidden_states, final_layer_norm->weight, final_layer_norm->bias, false);
+        
         return hidden_states;
     }
     
