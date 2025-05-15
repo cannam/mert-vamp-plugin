@@ -63,8 +63,18 @@ void dump(Tensor t, string filebase)
     cerr << "will dump tensor of sizes " << t.sizes() << endl;
     localnn::Tensor tt = localFromTorch(t);
 
-    int nrows = tt.sizes[1];
-    int ncols = tt.sizes[2];
+    int base = tt.sizes.size() - 2;
+    int nrows = 1;
+    
+    if (base < -1 || base > 2) {
+        cerr << "unsupported shape in dump";
+        exit(2);
+    }
+    if (base >= 0) {
+        nrows = tt.sizes[base + 0];
+    }
+
+    int ncols = tt.sizes[base + 1];
 
     cerr << "writing " << nrows << "-row " << ncols << "-column csv to "
          << filename << endl;
@@ -79,7 +89,13 @@ void dump(Tensor t, string filebase)
     }
     for (int i = 0; i < nrows; ++i) {
         for (int j = 0; j < ncols; ++j) {
-            csv << tt.at(0, i, j);
+            switch (base) {
+            case -1: csv << tt.at(j); break;
+            case 0: csv << tt.at(i, j); break;
+            case 1: csv << tt.at(0, i, j); break;
+            case 2: csv << tt.at(0, 0, i, j); break;
+            }
+                
             if (j + 1 < ncols) {
                 csv << ",";
             } else {
@@ -285,6 +301,61 @@ Tensor localConv1d(Tensor tt, int64_t ch_in, int64_t ch_out, int64_t ksize,
     return result;
 }
 
+void localLayerNorm(Tensor &tt, Tensor weightt, Tensor biast)
+{
+    // Fixed to last dimension
+    localnn::Tensor t = localFromTorch(tt.contiguous());
+    localnn::Tensor weight = localFromTorch(weightt);
+    localnn::Tensor bias = localFromTorch(biast);
+
+    int64_t h = *t.sizes.rbegin();
+    int64_t n = t.numel();
+    int64_t j = 0;
+
+    cerr << "h = " << h << endl;
+
+    while (j < n) {
+
+        float *base = t.data.data() + j;
+        
+        double mean = 0.0;
+        for (int i = 0; i < h; ++i) {
+            mean += base[i];
+        }
+        mean /= double(h);
+
+        double variance = 0.0;
+        for (int i = 0; i < h; ++i) {
+            variance += (base[i] - mean) * (base[i] - mean);
+        }
+        variance /= double(h);
+
+        double eps = 1.0e-5;
+        double sd = sqrt(variance + eps);
+            
+        for (int i = 0; i < h; ++i) {
+            double x = base[i];
+            double y = (x - mean) / sd;
+
+//            if (j == 0) {
+//                cout << i << ". (" << x << " - " << mean << ") / " << sd << " -> " << y << "; ";
+//            }
+
+            y = y * weight.at(i) + bias.at(i);
+
+//            if (j == 0) {
+//                cout << "* " << weight.at(i) << " + " << bias.at(i) << " = " << y << (fabs(y) > 1.0 ? " ***" : "") << endl;
+//            }
+
+            base[i] = y;
+        }
+        
+        j += h;
+    }
+
+    tt = torchFromLocal(t);
+}
+
 struct HubertNoLayerNormConvLayerImpl : LayerBase {
     int64_t layerId = 0;
     nn::Conv1d conv = nullptr;
@@ -355,6 +426,8 @@ struct HubertGroupNormConvLayerImpl : LayerBase {
                         convStrides[layerId], 0, 1, conv->weight, nullptr);
 
 //        x = conv(x);
+
+        //!!! group norm
         x = layer_norm(x);
 
 //        x = gelu(x);
@@ -410,7 +483,8 @@ struct MERTFeatureProjectionImpl : LayerBase {
     }
 
     Tensor forwardImpl(Tensor x) {
-        x = layer_norm(x);
+//        x = layer_norm(x);
+        localLayerNorm(x, layer_norm->weight, layer_norm->bias);
 //        x = linear(x);
         x = localLinear(x, linear->weight, linear->bias);
         return x;
@@ -663,8 +737,9 @@ struct HubertEncoderImpl : nn::Module {
         Tensor position_embeddings = pos_conv_embed(hidden_states);
 
         hidden_states = hidden_states + position_embeddings;
-        hidden_states = layer_norm(hidden_states);
 
+        localLayerNorm(hidden_states, layer_norm->weight, layer_norm->bias);
+        
         vector<Tensor> all_hidden_states;
         all_hidden_states.push_back(hidden_states);
 
