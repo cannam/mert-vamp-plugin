@@ -9,6 +9,8 @@
 
 #include "withoutlib.cpp"
 
+#include "../data/weights.hpp"
+
 using namespace std;
 using namespace torch;
 
@@ -489,9 +491,9 @@ struct HubertFeatureEncoderImpl : LayerBase {
 
     HubertFeatureEncoderImpl() {
         layers = register_module("conv_layers", nn::ModuleList());
-        layers->push_back(register_module("0", HubertGroupNormConvLayer(0)));
+        layers->push_back(HubertGroupNormConvLayer(0));
         for (int i = 1; i < convDimensions.size(); ++i) {
-            layers->push_back(register_module(to_string(i), HubertNoLayerNormConvLayer(i)));
+            layers->push_back(HubertNoLayerNormConvLayer(i));
         }
     }
 
@@ -542,17 +544,27 @@ struct HubertSamePadLayerImpl : LayerBase {
 
     HubertSamePadLayerImpl() { }
 
-    Tensor forwardImpl(Tensor x) {
-        if (nConvPosEmbeddings % 2 == 0) {
-            // [:, :, : -1]
-            return x.index({
-                    indexing::Slice(),
-                    indexing::Slice(),
-                    indexing::Slice(indexing::None, -1)
-                });
-        } else {
-            return x;
+    Tensor forwardImpl(Tensor tt) {
+        if (nConvPosEmbeddings % 2 != 0) {
+            return tt;
         }
+        localnn::Tensor t = localFromTorch(tt);
+        if (t.rank != 3) {
+            cerr << "error: wrong rank" << endl;
+            throw std::runtime_error("shape");
+        }
+        auto outsizes = t.sizes;
+        --(*outsizes.rbegin());
+        auto out = localnn::Tensor::empty(outsizes);
+        for (int i = 0; i < t.sizes[0]; ++i) {
+            for (int j = 0; j < t.sizes[1]; ++j) {
+#pragma GCC ivdep
+                for (int k = 0; k+1 < t.sizes[2]; ++k) {
+                    out.data[out.index(i, j, k)] = t.data[t.index(i, j, k)];
+                }
+            }
+        }
+        return torchFromLocal(out);
     }
     
 };
@@ -780,7 +792,7 @@ struct HubertEncoderImpl : nn::Module {
         layer_norm = register_module("layer_norm", nn::LayerNorm(options));
         layers = register_module("layers", nn::ModuleList());
         for (int i = 0; i < nHiddenLayers; ++i) {
-            layers->push_back(register_module(to_string(i), HubertEncoderLayer()));
+            layers->push_back(HubertEncoderLayer());
         }
     }
 
@@ -842,49 +854,19 @@ int main(int argc, char **argv)
 
     cerr << "Model parameters are:" << endl;
     auto params = mert->named_parameters();
+
     for (const auto &i : params) {
-        cerr << i.key() << endl;
-    }
-
-    ifstream saved("../data/for_libtorch.pth", ios::binary);
-    saved.seekg(0, ios::end);
-    auto size = saved.tellg();
-    saved.seekg(0, ios::beg);
-
-    cerr << "size = " << size << endl;
-    if (size <= 0) {
-        return 2;
-    }
-    
-    vector<char> buffer(size);
-    saved.read(buffer.data(), size);
-
-    if (saved) {
-        cerr << "read " << size << " chars" << endl;
-    } else {
-        cerr << "only read " << saved.gcount() << " of " << size << " chars"
-             << endl;
-        return 2;
-    }
-    
-    auto obj = pickle_load(buffer);
-
-    cerr << "Loaded the following:" << endl;
-    auto dict = obj.toGenericDict();
-    for (const auto &item : dict) {
-        if (!item.key().isString()) {
-            cerr << "(not a string key: " << item.key() << ")" << endl;
-            continue;
-        }
-        string key = *(item.key().toString());
-        auto value = item.value().toTensor();
-        cerr << key << " -> " << value.sizes();
-        if (params.contains(key)) {
-            params[key].set_data(value);
-            cerr << " - yes" << endl;
+        std::string key = i.key();
+        cerr << key;
+        vector<int64_t> sizes;
+        const float *data = lookup_model_data(key, sizes);
+        if (!data) {
+            cerr << " [! failed to load]";
         } else {
-            cerr << " - nope" << endl;
+            Tensor t = torch::from_blob((float *)data, sizes);
+            params[key].set_data(t);
         }
+        cerr << endl;
     }
 
 //    string testfile = "stairway-intro-16k-mono.wav";
