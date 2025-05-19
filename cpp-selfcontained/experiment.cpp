@@ -165,25 +165,30 @@ void localLinearImpl(const localnn::Tensor &in, int64_t inbase,
     }
 }
 
+localnn::Tensor localLinear_(const localnn::Tensor &in,
+                             const localnn::Tensor &weight,
+                             const localnn::Tensor &bias)
+{
+    auto rank = in.rank;
+    auto outsizes = in.sizes;
+    outsizes[rank-1] = weight.sizes[0];
+    auto out = localnn::Tensor::empty(outsizes);
+    int rix = 0;
+    while (in.sizes[rix] == 1) ++rix;
+    localLinearImpl(in, 0,
+                    out, 0,
+                    weight, bias,
+                    rank, rix);
+    return out;
+}
+
 Tensor localLinear(Tensor x, Tensor weight, Tensor bias)
 {
     auto tx = localFromTorch(x);
     auto tw = localFromTorch(weight);
     auto tb = localFromTorch(bias);
-    auto rank = tx.rank;
-    auto outsizes = tx.sizes;
-    outsizes[rank-1] = tw.sizes[0];
-    auto out = localnn::Tensor::empty(outsizes);
-    cerr << "new empty tensor: " << out << endl;
-    int rix = 0;
-    while (tx.sizes[rix] == 1) ++rix;
-    localLinearImpl(tx, 0,
-                    out, 0,
-                    tw, tb,
-                    rank, rix);
-    auto result = torchFromLocal(out);
-//    dump(result, "tmp");
-    return result;
+    auto result = localLinear_(tx, tw, tb);
+    return torchFromLocal(result);
 }
 
 struct LayerBase : nn::Module {
@@ -203,35 +208,35 @@ struct LayerBase : nn::Module {
     }
 };
 
-void localGelu(Tensor &tt)
+void localGelu_(localnn::Tensor &t)
 {
-    //!!! the fact that this .contiguous is necessary suggests we've
-    //!!! screwed up localFromTorch somehow
-    localnn::Tensor t = localFromTorch(tt.contiguous());
-
     const double alpha = M_SQRT1_2;
 
+    //!!! +omp
+    
     for (int64_t i = 0; i < t.data.size(); ++i) {
 
         double x = t.data[i];
         x = x * 0.5 * (1.0 + std::erf(x * alpha));
         t.data[i] = float(x);
     }
-
+}
+    
+void localGelu(Tensor &tt)
+{
+    //!!! the fact that this .contiguous is necessary suggests we've
+    //!!! screwed up localFromTorch somehow
+    localnn::Tensor t = localFromTorch(tt.contiguous());
+    localGelu_(t);
     tt = torchFromLocal(t);
 }
 
-Tensor localConv1d(Tensor tt, int64_t ch_in, int64_t ch_out, int64_t ksize,
-                   int64_t stride, int64_t padding, int64_t groups,
-                   Tensor weightt, Tensor *biasp)
+localnn::Tensor localConv1d_(const localnn::Tensor &t,
+                             int64_t ch_in, int64_t ch_out, int64_t ksize,
+                             int64_t stride, int64_t padding, int64_t groups,
+                             const localnn::Tensor &w,
+                             const localnn::Tensor *bp)
 {
-    cerr << "in shape = " << tt.sizes() << endl;
-    cerr << "weight shape = " << weightt.sizes() << endl;
-    cerr << "groups = " << groups << endl;
-    
-    localnn::Tensor t = localFromTorch(tt.contiguous());
-    localnn::Tensor w = localFromTorch(weightt);
-
     if (t.rank != 3 || t.strides[2] != 1) {
         throw std::runtime_error("unsupported format for input");
     }
@@ -248,11 +253,9 @@ Tensor localConv1d(Tensor tt, int64_t ch_in, int64_t ch_out, int64_t ksize,
 
     localnn::Tensor out = localnn::Tensor::empty({ t.sizes[0], ch_out, l_out });
     
-    localnn::Tensor bias;
-    float *bbase = nullptr;
-    if (biasp) {
-        bias = localFromTorch(*biasp);
-        bbase = bias.data.data();
+    const float *bbase = nullptr;
+    if (bp) {
+        bbase = bp->data.data();
     }
 
     for (int64_t b = 0; b < t.sizes[0]; ++b) {
@@ -297,20 +300,38 @@ Tensor localConv1d(Tensor tt, int64_t ch_in, int64_t ch_out, int64_t ksize,
             }
         }
     }
+
+    return out;
+}
+
+Tensor localConv1d(Tensor tt, int64_t ch_in, int64_t ch_out, int64_t ksize,
+                   int64_t stride, int64_t padding, int64_t groups,
+                   Tensor weightt, Tensor *biasp)
+{
+    cerr << "in shape = " << tt.sizes() << endl;
+    cerr << "weight shape = " << weightt.sizes() << endl;
+    cerr << "groups = " << groups << endl;
+    
+    localnn::Tensor t = localFromTorch(tt.contiguous());
+    localnn::Tensor w = localFromTorch(weightt);
+
+    localnn::Tensor bias;
+    if (biasp) {
+        bias = localFromTorch(*biasp);
+    }
+
+    auto out = localConv1d_(t, ch_in, ch_out, ksize, stride, padding, groups,
+                            w, biasp ? &bias : nullptr);
             
     Tensor result = torchFromLocal(out);
     cerr << "out shape = " << result.sizes() << endl;
     return result;
 }
 
-void localLayerNorm(Tensor &tt, Tensor weightt, Tensor biast,
-                    bool weightsPerInstance)
+void localLayerNorm_(localnn::Tensor &t,
+                     const localnn::Tensor &weight, const localnn::Tensor &bias,
+                     bool weightsPerInstance)
 {
-    // Fixed to last dimension
-    localnn::Tensor t = localFromTorch(tt.contiguous());
-    localnn::Tensor weight = localFromTorch(weightt);
-    localnn::Tensor bias = localFromTorch(biast);
-
     int64_t h = *t.sizes.rbegin();
     int64_t n = t.numel();
     int64_t j = 0;
@@ -356,15 +377,23 @@ void localLayerNorm(Tensor &tt, Tensor weightt, Tensor biast,
         
         j += h;
     }
+}
 
+void localLayerNorm(Tensor &tt, Tensor weightt, Tensor biast,
+                    bool weightsPerInstance)
+{
+    // Fixed to last dimension
+    localnn::Tensor t = localFromTorch(tt.contiguous()); //!!!???
+    localnn::Tensor weight = localFromTorch(weightt);
+    localnn::Tensor bias = localFromTorch(biast);
+
+    localLayerNorm_(t, weight, bias, weightsPerInstance);
+    
     tt = torchFromLocal(t);
 }
 
-Tensor localBMM(Tensor tt, Tensor mt)
+localnn::Tensor localBMM_(const localnn::Tensor &t, const localnn::Tensor &m)
 {
-    localnn::Tensor t = localFromTorch(tt.contiguous());
-    localnn::Tensor m = localFromTorch(mt.contiguous());
-
     if (t.rank != 3 || m.rank != 3) {
         cerr << "unsupported rank (" << t.rank << " or "
              << m.rank << ", should both be 3)" << endl;
@@ -394,6 +423,16 @@ Tensor localBMM(Tensor tt, Tensor mt)
         }
     }
 
+    return out;
+}
+
+Tensor localBMM(Tensor tt, Tensor mt)
+{
+    localnn::Tensor t = localFromTorch(tt.contiguous()); //!!!???
+    localnn::Tensor m = localFromTorch(mt.contiguous());
+
+    auto out = localBMM_(t, m);
+    
     return torchFromLocal(out);
 }
 
