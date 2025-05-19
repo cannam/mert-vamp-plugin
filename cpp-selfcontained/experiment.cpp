@@ -192,14 +192,18 @@ Tensor localLinear(Tensor x, Tensor weight, Tensor bias)
 }
 
 struct LayerBase : nn::Module {
-    virtual Tensor forwardImpl(Tensor x) = 0;
-    
+    virtual localnn::Tensor forwardImpl(const localnn::Tensor &x) = 0;
+
     virtual Tensor forward(Tensor x) {
 #ifdef DEBUG_TENSOR_SHAPES
         auto inshape = x.sizes();
         auto instrides = x.strides();
 #endif
-        x = forwardImpl(x);
+
+        localnn::Tensor in = localFromTorch(x.contiguous());
+        localnn::Tensor out = forwardImpl(in);
+        x = torchFromLocal(out);
+        
 #ifdef DEBUG_TENSOR_SHAPES
         cerr << abi::__cxa_demangle(typeid(*this).name(), nullptr, nullptr, nullptr) << ": " << inshape << " (" << instrides << ") -> " << x.sizes() << " (" << x.strides() << ")" << endl;
 #endif
@@ -452,24 +456,20 @@ struct HubertNoLayerNormConvLayerImpl : LayerBase {
         conv = register_module("conv", nn::Conv1d(options));
     }
     
-    Tensor forwardImpl(Tensor x) override {
-//        Tensor y = conv(x);
+    localnn::Tensor forwardImpl(const localnn::Tensor &x) override {
 
         int64_t inSize = 1;
         if (layerId > 0) inSize = convDimensions[layerId-1];
         int64_t outSize = convDimensions[layerId];
-        x = localConv1d(x, inSize, outSize, convKernels[layerId],
-                        convStrides[layerId], 0, 1, conv->weight, nullptr);
-/*!!!
-        dump(y, "conv-torch");
-        dump(x, "conv-local");
-        dump(y - x, "conv-diff");
-        exit(2);
-*/        
-//        x = gelu(x);
-        localGelu(x);
+
+        localnn::Tensor w = localFromTorch(conv->weight);
         
-        return x;
+        auto tmp = localConv1d_(x, inSize, outSize,
+                                convKernels[layerId], convStrides[layerId],
+                                0, 1, w, nullptr);
+        localGelu_(tmp);
+        
+        return tmp;
     }
 };
 
@@ -497,28 +497,25 @@ struct HubertGroupNormConvLayerImpl : LayerBase {
         layer_norm = register_module("layer_norm", nn::GroupNorm(normOptions));
     }
     
-    Tensor forwardImpl(Tensor x) override {
+    localnn::Tensor forwardImpl(const localnn::Tensor &x) override {
 
         int64_t inSize = 1;
         if (layerId > 0) inSize = convDimensions[layerId-1];
         int64_t outSize = convDimensions[layerId];
-        x = localConv1d(x, inSize, outSize, convKernels[layerId],
-                        convStrides[layerId], 0, 1, conv->weight, nullptr);
 
-//        x = conv(x);
+        localnn::Tensor w = localFromTorch(conv->weight);
 
-        cerr << "sizes on input to group norm: " << x.sizes() << endl;
-        
-        //!!! group norm
-//        x = layer_norm(x);
-//        localLayerNorm(x, layer_norm->weight, layer_norm->bias);
+        auto tmp = localConv1d_(x, inSize, outSize,
+                                convKernels[layerId], convStrides[layerId],
+                                0, 1, w, nullptr);
 
-        localLayerNorm(x, layer_norm->weight, layer_norm->bias, true);
+        w = localFromTorch(layer_norm->weight);
+        auto b = localFromTorch(layer_norm->bias);
         
-//        x = gelu(x);
-        localGelu(x);
+        localLayerNorm_(tmp, w, b, true);
+        localGelu_(tmp);
         
-        return x;
+        return tmp;
     }
 };
 
@@ -536,16 +533,18 @@ struct HubertFeatureEncoderImpl : LayerBase {
         }
     }
 
-    Tensor forwardImpl(Tensor x) {
+    localnn::Tensor forwardImpl(const localnn::Tensor &x) {
+        localnn::Tensor t = x;
         for (int i = 0; i < layers->size(); ++i) {
             if (auto layer = layers[i]->as<LayerBase>()) {
-                x = layer->forward(x);
+                t = layer->forwardImpl(t);
             } else {
                 cerr << "HubertFeatureEncoder: Unexpected type for layer " << i
                      << endl;
+                throw std::runtime_error("wrong type");
             }
         }
-        return x;
+        return t;
     }
 };
 
@@ -567,12 +566,16 @@ struct MERTFeatureProjectionImpl : LayerBase {
         linear = register_module("projection", nn::Linear(inSize, outSize));
     }
 
-    Tensor forwardImpl(Tensor x) {
-//        x = layer_norm(x);
-        localLayerNorm(x, layer_norm->weight, layer_norm->bias, false);
-//        x = linear(x);
-        x = localLinear(x, linear->weight, linear->bias);
-        return x;
+    localnn::Tensor forwardImpl(const localnn::Tensor &x) {
+        localnn::Tensor t = x;
+        localLayerNorm_(t,
+                        localFromTorch(layer_norm->weight),
+                        localFromTorch(layer_norm->bias),
+                        false);
+        t = localLinear_(t,
+                         localFromTorch(linear->weight),
+                         localFromTorch(linear->bias));
+        return t;
     }
         
 };
@@ -583,11 +586,10 @@ struct HubertSamePadLayerImpl : LayerBase {
 
     HubertSamePadLayerImpl() { }
 
-    Tensor forwardImpl(Tensor tt) {
+    localnn::Tensor forwardImpl(const localnn::Tensor &t) {
         if (nConvPosEmbeddings % 2 != 0) {
-            return tt;
+            return t;
         }
-        localnn::Tensor t = localFromTorch(tt);
         if (t.rank != 3) {
             cerr << "error: wrong rank" << endl;
             throw std::runtime_error("shape");
@@ -603,7 +605,7 @@ struct HubertSamePadLayerImpl : LayerBase {
                 }
             }
         }
-        return torchFromLocal(out);
+        return out;
     }
     
 };
@@ -630,22 +632,26 @@ struct HubertPositionalConvEmbeddingImpl : LayerBase {
         padding = register_module("padding", HubertSamePadLayer());
     }
 
-    Tensor forwardImpl(Tensor hidden_states) {
-        hidden_states = hidden_states.transpose(1, 2);
+    localnn::Tensor forwardImpl(const localnn::Tensor &in) {
 
-//        hidden_states = conv(hidden_states);
-        hidden_states = localConv1d(hidden_states, hiddenSize, hiddenSize,
-                                    nConvPosEmbeddings, 1, nConvPosEmbeddings/2,
-                                    nConvPosEmbeddingGroups,
-                                    conv->weight,
-                                    &conv->bias);
+        //!!!
+        auto hidden_states = localFromTorch(torchFromLocal(in).transpose(1, 2).contiguous());
 
-        hidden_states = padding(hidden_states);
-
-//        hidden_states = gelu(hidden_states);
-        localGelu(hidden_states);
+        auto w = localFromTorch(conv->weight);
+        auto b = localFromTorch(conv->bias);
         
-        hidden_states = hidden_states.transpose(1, 2);
+        hidden_states = localConv1d_(hidden_states, hiddenSize, hiddenSize,
+                                     nConvPosEmbeddings, 1, nConvPosEmbeddings/2,
+                                     nConvPosEmbeddingGroups,
+                                     w, &b);
+
+        hidden_states = padding->forwardImpl(hidden_states);
+
+        localGelu_(hidden_states);
+
+        //!!!
+        hidden_states = localFromTorch(torchFromLocal(hidden_states).transpose(1, 2).contiguous());
+        
         return hidden_states;
     }
     
@@ -681,8 +687,11 @@ struct HubertAttentionImpl : LayerBase {
         return x.view(dim).transpose(1, 2).contiguous();
     }
     
-    Tensor forwardImpl(Tensor hidden_states) {
+    localnn::Tensor forwardImpl(const localnn::Tensor &in) {
 
+        //!!! for now
+        Tensor hidden_states = torchFromLocal(in);
+        
         // "Input shape: Batch x Time x Channel"
         auto bsz = hidden_states.sizes()[0];
         auto tgt_len = hidden_states.sizes()[1];
@@ -704,7 +713,7 @@ struct HubertAttentionImpl : LayerBase {
              << ", v' = " << value_states.sizes() << endl;
 
         int64_t src_len = key_states.sizes()[1];
-        Tensor attn_weights = localBMM(query_states, key_states.transpose(1, 2));
+        Tensor attn_weights = localBMM(query_states, key_states.transpose(1, 2).contiguous());
 
         vector<int64_t> expected { bsz * num_heads, tgt_len, src_len };
         if (attn_weights.sizes() != expected) {
@@ -742,7 +751,7 @@ struct HubertAttentionImpl : LayerBase {
         
         cerr << "output after projection = " << attn_output.sizes() << endl;
         
-        return attn_output;
+        return localFromTorch(attn_output.contiguous()); //!!!
     }
     
 };
@@ -761,15 +770,20 @@ struct HubertFeedForwardImpl : LayerBase {
             ("output_dense", nn::Linear(intermediateSize, hiddenSize));
     }
 
-    Tensor forwardImpl(Tensor hidden_states) {
-//        hidden_states = intermediate_dense(hidden_states);
-        hidden_states = localLinear(hidden_states, intermediate_dense->weight, intermediate_dense->bias);
+    localnn::Tensor forwardImpl(const localnn::Tensor &in) {
 
-//        hidden_states = gelu(hidden_states);
-        localGelu(hidden_states);
+        auto hidden_states = localLinear_
+            (in,
+             localFromTorch(intermediate_dense->weight),
+             localFromTorch(intermediate_dense->bias));
+
+        localGelu_(hidden_states);
         
-//        hidden_states = output_dense(hidden_states);
-        hidden_states = localLinear(hidden_states, output_dense->weight, output_dense->bias);
+        hidden_states = localLinear_
+            (hidden_states,
+             localFromTorch(output_dense->weight),
+             localFromTorch(output_dense->bias));
+        
         return hidden_states;
     }
     
@@ -796,20 +810,31 @@ struct HubertEncoderLayerImpl : LayerBase {
         final_layer_norm = register_module("final_layer_norm", nn::LayerNorm(options));
     }
 
-    Tensor forwardImpl(Tensor hidden_states) {
-        Tensor attn_residual = hidden_states;
+    localnn::Tensor forwardImpl(const localnn::Tensor &in) {
+        
+        localnn::Tensor attn_residual = in;
 
-        hidden_states = attention(hidden_states);
+        localnn::Tensor hidden_states = attention->forwardImpl(in);
 
-        hidden_states = attn_residual + hidden_states;
+        for (int64_t i = 0; i < hidden_states.numel(); ++i) {
+            hidden_states.data[i] += attn_residual.data[i];
+        }
 
-//        hidden_states = layer_norm(hidden_states);
-        localLayerNorm(hidden_states, layer_norm->weight, layer_norm->bias, false);
+        localLayerNorm_(hidden_states,
+                        localFromTorch(layer_norm->weight),
+                        localFromTorch(layer_norm->bias),
+                        false);
 
-        hidden_states = hidden_states + feed_forward(hidden_states);
+        localnn::Tensor ff = feed_forward->forwardImpl(hidden_states);
 
-        //hidden_states = final_layer_norm(hidden_states);
-        localLayerNorm(hidden_states, final_layer_norm->weight, final_layer_norm->bias, false);
+        for (int64_t i = 0; i < hidden_states.numel(); ++i) {
+            hidden_states.data[i] += ff.data[i];
+        }
+
+        localLayerNorm_(hidden_states,
+                        localFromTorch(final_layer_norm->weight),
+                        localFromTorch(final_layer_norm->bias),
+                        false);
         
         return hidden_states;
     }
@@ -836,6 +861,8 @@ struct HubertEncoderImpl : nn::Module {
     }
 
     vector<Tensor> forward(Tensor hidden_states) {
+
+        ///!!!
         
         Tensor position_embeddings = pos_conv_embed(hidden_states);
 
