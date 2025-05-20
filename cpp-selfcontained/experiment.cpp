@@ -731,8 +731,7 @@ struct HubertPositionalConvEmbeddingImpl : LayerBase {
 
     localnn::Tensor forwardImpl(const localnn::Tensor &in) {
 
-        //!!!
-        auto hidden_states = localFromTorch(torchFromLocal(in).transpose(1, 2).contiguous());
+        auto hidden_states = localTranspose12of3(in);
 
         auto w = localFromTorch(conv->weight);
         auto b = localFromTorch(conv->bias);
@@ -746,8 +745,7 @@ struct HubertPositionalConvEmbeddingImpl : LayerBase {
 
         localGelu_(hidden_states);
 
-        //!!!
-        hidden_states = localFromTorch(torchFromLocal(hidden_states).transpose(1, 2).contiguous());
+        hidden_states = localTranspose12of3(hidden_states);
         
         return hidden_states;
     }
