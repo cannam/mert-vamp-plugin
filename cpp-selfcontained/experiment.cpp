@@ -48,23 +48,12 @@ Tensor torchFromLocal(localnn::Tensor t)
     return torch::from_blob(t.data.data(), { t.sizes.data(), t.sizes.size() }).clone();
 }
 
-void dump(Tensor t, string filebase)
+void dump(const localnn::Tensor &tt, string filebase)
 {
-    // We assume t has channels as first dimension but only has one
-    // channel, so we can treat as 2-d
-    
-    // We did nothing to move it away from the CPU, but just in case
-    // that changes later!
-    t = t.to(kCPU).contiguous();
-
-    vector<float> v(t.data_ptr<float>(), t.data_ptr<float>() + t.numel());
-    
     string filename = filebase + ".csv";
     ofstream csv(filename);
 
-    cerr << "will dump tensor of sizes " << t.sizes() << endl;
-    localnn::Tensor tt = localFromTorch(t);
-
+    
     int base = tt.sizes.size() - 2;
     int nrows = 1;
     
@@ -130,6 +119,21 @@ void dump(Tensor t, string filebase)
         }
     }
 */
+}
+
+void dump(Tensor t, string filebase)
+{
+    // We assume t has channels as first dimension but only has one
+    // channel, so we can treat as 2-d
+    
+    // We did nothing to move it away from the CPU, but just in case
+    // that changes later!
+    t = t.to(kCPU).contiguous();
+
+    cerr << "will dump tensor of sizes " << t.sizes() << endl;
+    localnn::Tensor tt = localFromTorch(t);
+
+    dump(tt, filebase);
 }
 
 void localLinearImpl(const localnn::Tensor &in, int64_t inbase,
@@ -233,6 +237,68 @@ void localGelu(Tensor &tt)
     localnn::Tensor t = localFromTorch(tt.contiguous());
     localGelu_(t);
     tt = torchFromLocal(t);
+}
+
+// We always copy for reshape and transpose, because we can only
+// handle contiguous layouts in some other functions
+
+localnn::Tensor localReshape(const localnn::Tensor &t, const vector<int64_t> outsizes)
+{
+    //!!! clumsy but test this first
+    localnn::Tensor out = localnn::Tensor::empty(outsizes);
+    int64_t n = t.numel();
+    if (out.numel() != n) {
+        cerr << "wrong total number of elements in reshape" << endl;
+        throw std::runtime_error("shape");
+    }
+    out.data = t.data;
+    return out;
+}
+
+localnn::Tensor localTranspose12of3(const localnn::Tensor &t)
+{
+    if (t.rank != 3) {
+        throw std::runtime_error("shape");
+    }
+    int64_t a = t.sizes[0];
+    int64_t b = t.sizes[1];
+    int64_t c = t.sizes[2];
+    vector<int64_t> outsizes = { a, c, b };
+    localnn::Tensor out = localnn::Tensor::empty(outsizes);
+    for (int64_t i = 0; i < a; ++i) {
+        for (int64_t j = 0; j < b; ++j) {
+#pragma GCC ivdep
+            for (int64_t k = 0; k < c; ++k) {
+                out.data[out.index(i, k, j)] = t.data[t.index(i, j, k)];
+            }
+        }
+    }
+    return out;
+}
+
+localnn::Tensor localTranspose12of4(const localnn::Tensor &t)
+{
+    if (t.rank != 4) {
+        throw std::runtime_error("shape");
+    }
+    int64_t a = t.sizes[0];
+    int64_t b = t.sizes[1];
+    int64_t c = t.sizes[2];
+    int64_t d = t.sizes[3];
+    vector<int64_t> outsizes = { a, c, b, d };
+    localnn::Tensor out = localnn::Tensor::empty(outsizes);
+    for (int64_t i = 0; i < a; ++i) {
+        for (int64_t j = 0; j < b; ++j) {
+            for (int64_t k = 0; k < c; ++k) {
+#pragma GCC ivdep
+                for (int64_t m = 0; m < d; ++m) {
+                    out.data[out.index(i, k, j, m)] =
+                        t.data[t.index(i, j, k, m)];
+                }
+            }
+        }
+    }
+    return out;
 }
 
 localnn::Tensor localConv1d_(const localnn::Tensor &t,
@@ -696,6 +762,11 @@ struct HubertAttentionImpl : LayerBase {
         auto bsz = hidden_states.sizes()[0];
         auto tgt_len = hidden_states.sizes()[1];
 
+        cerr << "HubertAttentionImpl::forwardImpl: input shape = "
+             << hidden_states.sizes() << endl;
+
+        // input = [1, 1030, 768]   (where 1030 is the sequence length)
+        
         //!!! why do we just reshape it twice? what is the point?
         Tensor query_states = q_proj(hidden_states) * scaling;
         Tensor key_states = shape(k_proj(hidden_states), -1, bsz);
@@ -703,6 +774,10 @@ struct HubertAttentionImpl : LayerBase {
 
         cerr << "q = " << query_states.sizes() << ", k = " << key_states.sizes()
              << ", v = " << value_states.sizes() << endl;
+
+        // q = [1, 1030, 768]
+        // k = [1, 12, 1030, 64]
+        // v = [1, 12, 1030, 64]
         
         vector<int64_t> proj_shape { bsz * num_heads, -1, head_dim };
         query_states = shape(query_states, tgt_len, bsz).view(proj_shape);
@@ -712,6 +787,10 @@ struct HubertAttentionImpl : LayerBase {
         cerr << "q' = " << query_states.sizes() << ", k' = " << key_states.sizes()
              << ", v' = " << value_states.sizes() << endl;
 
+        // q' = [12, 1030, 64]
+        // k' = [12, 1030, 64]
+        // v' = [12, 1030, 64]
+        
         int64_t src_len = key_states.sizes()[1];
         Tensor attn_weights = localBMM(query_states, key_states.transpose(1, 2).contiguous());
 
@@ -734,22 +813,32 @@ struct HubertAttentionImpl : LayerBase {
         }
 
         cerr << "output pre-reshape = " << attn_output.sizes() << endl;
+
+        // output pre-reshape = [12, 1030, 64]
         
         attn_output = attn_output.view({ bsz, num_heads, tgt_len, head_dim });
 
         cerr << "output after view(" << bsz << "," << num_heads << "," << tgt_len << "," << head_dim << ") = " << attn_output.sizes() << endl;
+
+        // output after view = [1, 12, 1030, 64]
         
         attn_output = attn_output.transpose(1, 2);
 
         cerr << "output after transpose(1, 2) = " << attn_output.sizes() << endl;
+
+        // output after transpose = [1, 1030, 12, 64]
         
         attn_output = attn_output.reshape({ bsz, tgt_len, embed_dim });
 
         cerr << "output after reshape(" << bsz << "," << tgt_len << "," << embed_dim << ") = " << attn_output.sizes() << endl;
+
+        // output after reshape = [1, 1030, 768]
         
         attn_output = out_proj(attn_output);
         
         cerr << "output after projection = " << attn_output.sizes() << endl;
+        
+        // output after projection = [1, 1030, 768]
         
         return localFromTorch(attn_output.contiguous()); //!!!
     }
@@ -860,24 +949,25 @@ struct HubertEncoderImpl : nn::Module {
         }
     }
 
-    vector<Tensor> forward(Tensor hidden_states) {
+    vector<localnn::Tensor> forward(const localnn::Tensor &in) {
 
-        ///!!!
+        auto hidden_states = pos_conv_embed->forwardImpl(in);
+
+        for (int64_t i = 0; i < hidden_states.numel(); ++i) {
+            hidden_states.data[i] += in.data[i];
+        }
+
+        localLayerNorm_(hidden_states,
+                        localFromTorch(layer_norm->weight),
+                        localFromTorch(layer_norm->bias),
+                        false);
         
-        Tensor position_embeddings = pos_conv_embed(hidden_states);
-
-        hidden_states = hidden_states + position_embeddings;
-
-        localLayerNorm(hidden_states, layer_norm->weight, layer_norm->bias,
-                       false);
-        
-        vector<Tensor> all_hidden_states;
+        vector<localnn::Tensor> all_hidden_states;
         all_hidden_states.push_back(hidden_states);
 
         for (int i = 0; i < layers->size(); ++i) {
             if (auto layer = layers[i]->as<HubertEncoderLayer>()) {
-                hidden_states = layer->forward(hidden_states);
-                //!!! probably have to copy this explicitly
+                hidden_states = layer->forwardImpl(hidden_states);
                 all_hidden_states.push_back(hidden_states);
             }
         }
@@ -901,11 +991,11 @@ struct MERTImpl : nn::Module {
         encoder = register_module("encoder", HubertEncoder());
     }
 
-    vector<Tensor> forward(Tensor input_values) {
-        Tensor extract_features = feature_extractor(input_values);
-        extract_features = extract_features.transpose(1, 2);
-        Tensor hidden_states = feature_projection(extract_features);
-        auto encoder_outputs = encoder(hidden_states);
+    vector<localnn::Tensor> forward(const localnn::Tensor &input_values) {
+        auto extract_features = feature_extractor->forwardImpl(input_values);
+        extract_features = localTranspose12of3(extract_features);
+        auto hidden_states = feature_projection->forwardImpl(extract_features);
+        auto encoder_outputs = encoder->forward(hidden_states);
         return encoder_outputs;
     }
     
@@ -960,9 +1050,13 @@ int main(int argc, char **argv)
     cerr << "read " << data.size() << "-sample vector from test file "
          << testfile << endl;
 
-    Tensor input = torch::from_blob(data.data(), { 1, 1, data.size() }).clone();
+    //!!!
+    localnn::Tensor input = localnn::Tensor::empty({ 1, 1, data.size() });
+    input.data = data;
+    
+//    Tensor input = torch::from_blob(data.data(), { 1, 1, data.size() }).clone();
 
-    vector<Tensor> output = mert(input);
+    vector<localnn::Tensor> output = mert(input);
 
     cerr << "received " << output.size() << " tensors as output" << endl;
 
