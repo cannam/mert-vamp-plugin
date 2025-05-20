@@ -82,21 +82,21 @@ void localLinearImpl(const localnn::Tensor &in, int64_t inbase,
                      int64_t rix)
 {
     const float *indata = in.data();
+    const float *wdata = weight.data();
+    const float *bdata = bias.data();
     float *outdata = out.mutableData();
     if (rix + 1 == rank) {
         const int64_t insize = in.sizes[rix];
-        const int64_t instride = in.strides[rix];
         const int64_t outsize = out.sizes[rix];
-        const int64_t outstride = out.strides[rix];
 #pragma omp parallel for
         for (int64_t j = 0; j < outsize; ++j) {
             float x = 0.f;
 #pragma GCC ivdep
             for (int64_t i = 0; i < insize; ++i) {
-                x += weight.at(j, i) * indata[inbase + i * instride];
+                x += wdata[j * insize + i] * indata[inbase + i];
             }
-            x += bias.at(j);
-            outdata[outbase + j * outstride] = x;
+            x += bdata[j];
+            outdata[outbase + j] = x;
         }
     } else {
 #pragma omp parallel for
@@ -115,6 +115,9 @@ localnn::Tensor localLinear_(const localnn::Tensor &in,
 {
     auto rank = in.rank;
     auto outsizes = in.sizes;
+    if (in.strides[rank-1] != 1) {
+        throw std::runtime_error("not contiguous");
+    }
     outsizes[rank-1] = weight.sizes[0];
     auto out = localnn::Tensor(outsizes);
     int rix = 0;
