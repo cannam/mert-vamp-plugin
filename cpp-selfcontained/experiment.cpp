@@ -403,23 +403,20 @@ void localLayerNorm_(localnn::Tensor &t,
                      bool weightsPerInstance)
 {
     int64_t h = *t.sizes.rbegin();
-    int64_t n = t.numel();
-    int64_t j = 0;
+    int64_t m = t.numel() / h;
 
-    cerr << "h = " << h << ", have " << weight.sizes[0] << " weights" << endl;
+    for (int64_t j = 0; j < m; ++j) {
 
-    while (j < n) {
-
-        float *base = t.data.data() + j;
+        float *base = t.data.data() + j * h;
         
         double mean = 0.0;
-        for (int i = 0; i < h; ++i) {
+        for (int64_t i = 0; i < h; ++i) {
             mean += base[i];
         }
         mean /= double(h);
 
         double variance = 0.0;
-        for (int i = 0; i < h; ++i) {
+        for (int64_t i = 0; i < h; ++i) {
             variance += (base[i] - mean) * (base[i] - mean);
         }
         variance /= double(h);
@@ -427,7 +424,7 @@ void localLayerNorm_(localnn::Tensor &t,
         double eps = 1.0e-5;
         double sd = sqrt(variance + eps);
             
-        for (int i = 0; i < h; ++i) {
+        for (int64_t i = 0; i < h; ++i) {
 
             double x = base[i];
             double y = (x - mean) / sd;
@@ -437,15 +434,13 @@ void localLayerNorm_(localnn::Tensor &t,
                 // GroupNorm layer. The GroupNorm is supplied with
                 // groups == channels so is actually performing an
                 // instance norm
-                y = y * weight.at(j / h) + bias.at(j / h);
+                y = y * weight.at(j) + bias.at(j);
             } else {
                 y = y * weight.at(i) + bias.at(i);
             }                
 
             base[i] = y;
         }
-        
-        j += h;
     }
 }
 
@@ -479,13 +474,13 @@ localnn::Tensor localBMM_(const localnn::Tensor &t, const localnn::Tensor &m)
         throw std::runtime_error("shape");
     }
     
-    for (int b = 0; b < t.sizes[0]; ++b) {
+    for (int64_t b = 0; b < t.sizes[0]; ++b) {
 #pragma omp parallel for
-        for (int i = 0; i < t.sizes[1]; ++i) {
-            for (int j = 0; j < m.sizes[2]; ++j) {
+        for (int64_t i = 0; i < t.sizes[1]; ++i) {
+            for (int64_t j = 0; j < m.sizes[2]; ++j) {
                 double d = 0.0;
 #pragma GCC ivdep
-                for (int k = 0; k < m.sizes[1]; ++k) {
+                for (int64_t k = 0; k < m.sizes[1]; ++k) {
                     d += t.at(b, i, k) * m.at(b, k, j);
                 }
                 out.data[out.index(b, i, j)] = d;
