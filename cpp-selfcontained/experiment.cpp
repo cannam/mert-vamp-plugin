@@ -242,13 +242,26 @@ void localGelu(Tensor &tt)
 // We always copy for reshape and transpose, because we can only
 // handle contiguous layouts in some other functions
 
-localnn::Tensor localReshape(const localnn::Tensor &t, const vector<int64_t> outsizes)
+localnn::Tensor localReshape(const localnn::Tensor &t, vector<int64_t> outsizes)
 {
+    cerr << "localReshape: proposed sizes: " << outsizes << ", numel: " << t.numel() << endl;
     //!!! clumsy but test this first
+    for (int i = 0; i < outsizes.size(); ++i) {
+        if (outsizes[i] < 0) {
+            outsizes[i] = t.numel();
+            for (int j = 0; j < outsizes.size(); ++j) {
+                if (j != i && outsizes[j] > 0) {
+                    outsizes[i] /= outsizes[j];
+                }
+            }
+            break;
+        }
+    }
+    cerr << "localReshape: adjusted sizes: " << outsizes << endl;
     localnn::Tensor out = localnn::Tensor::empty(outsizes);
     int64_t n = t.numel();
     if (out.numel() != n) {
-        cerr << "wrong total number of elements in reshape" << endl;
+        cerr << "wrong total number of elements in reshape (" << out.numel() << " vs " << n << ")" << endl;
         throw std::runtime_error("shape");
     }
     out.data = t.data;
@@ -743,99 +756,125 @@ struct HubertAttentionImpl : LayerBase {
         out_proj = register_module("out_proj", nn::Linear(embed_dim, embed_dim));
     }
 
-    Tensor shape(Tensor x, int64_t seq_len, int64_t bsz) {
+    localnn::Tensor shape(const localnn::Tensor &x, int64_t seq_len, int64_t bsz) {
         vector<int64_t> dim { bsz, seq_len, num_heads, head_dim };
-        return x.view(dim).transpose(1, 2).contiguous();
+        return localTranspose12of4(localReshape(x, dim));
     }
     
-    localnn::Tensor forwardImpl(const localnn::Tensor &in) {
-
-        //!!! for now
-        Tensor hidden_states = torchFromLocal(in);
+    localnn::Tensor forwardImpl(const localnn::Tensor &hidden_states) {
         
         // "Input shape: Batch x Time x Channel"
-        auto bsz = hidden_states.sizes()[0];
-        auto tgt_len = hidden_states.sizes()[1];
+        auto bsz = hidden_states.sizes[0];
+        auto tgt_len = hidden_states.sizes[1];
 
         cerr << "HubertAttentionImpl::forwardImpl: input shape = "
-             << hidden_states.sizes() << endl;
+             << hidden_states.sizes << endl;
 
         // input = [1, 1030, 768]   (where 1030 is the sequence length)
         
         //!!! why do we just reshape it twice? what is the point?
-        Tensor query_states = q_proj(hidden_states) * scaling;
-        Tensor key_states = shape(k_proj(hidden_states), -1, bsz);
-        Tensor value_states = shape(v_proj(hidden_states), -1, bsz);
+        auto query_states =
+            localLinear_(hidden_states,
+                         localFromTorch(q_proj->weight),
+                         localFromTorch(q_proj->bias));
+        
+        for (int64_t i = 0; i < query_states.numel(); ++i) {
+            query_states.data[i] *= scaling;
+        }
 
-        cerr << "q = " << query_states.sizes() << ", k = " << key_states.sizes()
-             << ", v = " << value_states.sizes() << endl;
+        auto key_states =
+            shape(localLinear_(hidden_states,
+                               localFromTorch(k_proj->weight),
+                               localFromTorch(k_proj->bias)),
+                  -1, bsz);
 
+//        auto key_states = shape(k_proj->forwardImpl(hidden_states), tgt_len, bsz);
+        auto value_states =
+            shape(localLinear_(hidden_states,
+                               localFromTorch(v_proj->weight),
+                               localFromTorch(v_proj->bias)),
+                  -1, bsz);
+
+//        auto value_states = shape(v_proj->forwardImpl(hidden_states), tgt_len, bsz);
+
+        cerr << "q = " << query_states.sizes << ", k = " << key_states.sizes
+             << ", v = " << value_states.sizes << endl;
+        
         // q = [1, 1030, 768]
         // k = [1, 12, 1030, 64]
         // v = [1, 12, 1030, 64]
         
         vector<int64_t> proj_shape { bsz * num_heads, -1, head_dim };
-        query_states = shape(query_states, tgt_len, bsz).view(proj_shape);
-        key_states = key_states.reshape(proj_shape);
-        value_states = value_states.reshape(proj_shape);
+        query_states = localReshape(shape(query_states, tgt_len, bsz), proj_shape);
+        
+        key_states = localReshape(key_states, proj_shape);
+        value_states = localReshape(value_states, proj_shape);
 
-        cerr << "q' = " << query_states.sizes() << ", k' = " << key_states.sizes()
-             << ", v' = " << value_states.sizes() << endl;
+        cerr << "q' = " << query_states.sizes << ", k' = " << key_states.sizes
+             << ", v' = " << value_states.sizes << endl;
 
         // q' = [12, 1030, 64]
         // k' = [12, 1030, 64]
         // v' = [12, 1030, 64]
         
-        int64_t src_len = key_states.sizes()[1];
-        Tensor attn_weights = localBMM(query_states, key_states.transpose(1, 2).contiguous());
+        int64_t src_len = key_states.sizes[1];
+        auto attn_weights = localBMM_(query_states, localTranspose12of3(key_states));
 
         vector<int64_t> expected { bsz * num_heads, tgt_len, src_len };
-        if (attn_weights.sizes() != expected) {
-            cerr << "Attention weights should be of size " << expected
-                 << " but are of size " << attn_weights.sizes() << endl;
+        if (attn_weights.sizes != expected) {
+            throw std::runtime_error("shape");
+//            cerr << "Attention weights should be of size " << expected
+//                 << " but are of size " << attn_weights.sizes() << endl;
         }
 
         // All masking etc omitted here (relevant only in training)
-        
-        attn_weights = softmax(attn_weights, -1);
 
-        Tensor attn_output = localBMM(attn_weights, value_states);
+        //!!!
+        attn_weights = localFromTorch(softmax(torchFromLocal(attn_weights), -1).contiguous());
+
+        auto attn_output = localBMM_(attn_weights, value_states);
         
         expected = { bsz * num_heads, tgt_len, head_dim };
-        if (attn_output.sizes() != expected) {
-            cerr << "Attention output should be of size " << expected
-                 << " but are of size " << attn_weights.sizes() << endl;
+        if (attn_output.sizes != expected) {
+            throw std::runtime_error("shape");
+//            cerr << "Attention output should be of size " << expected
+//                 << " but are of size " << attn_weights.sizes() << endl;
         }
 
-        cerr << "output pre-reshape = " << attn_output.sizes() << endl;
+        cerr << "output pre-reshape = " << attn_output.sizes << endl;
 
         // output pre-reshape = [12, 1030, 64]
         
-        attn_output = attn_output.view({ bsz, num_heads, tgt_len, head_dim });
+//        attn_output = attn_output.view({ bsz, num_heads, tgt_len, head_dim });
+        attn_output = localReshape(attn_output, { bsz, num_heads, tgt_len, head_dim });
 
-        cerr << "output after view(" << bsz << "," << num_heads << "," << tgt_len << "," << head_dim << ") = " << attn_output.sizes() << endl;
+        cerr << "output after view(" << bsz << "," << num_heads << "," << tgt_len << "," << head_dim << ") = " << attn_output.sizes << endl;
 
         // output after view = [1, 12, 1030, 64]
         
-        attn_output = attn_output.transpose(1, 2);
+        attn_output = localTranspose12of4(attn_output);
 
-        cerr << "output after transpose(1, 2) = " << attn_output.sizes() << endl;
+        cerr << "output after transpose(1, 2) = " << attn_output.sizes << endl;
 
         // output after transpose = [1, 1030, 12, 64]
         
-        attn_output = attn_output.reshape({ bsz, tgt_len, embed_dim });
+        attn_output = localReshape(attn_output, { bsz, tgt_len, embed_dim });
 
-        cerr << "output after reshape(" << bsz << "," << tgt_len << "," << embed_dim << ") = " << attn_output.sizes() << endl;
+        cerr << "output after reshape(" << bsz << "," << tgt_len << "," << embed_dim << ") = " << attn_output.sizes << endl;
 
         // output after reshape = [1, 1030, 768]
         
-        attn_output = out_proj(attn_output);
+//        attn_output = out_proj->forwardImpl(attn_output);
+        attn_output = localLinear_(attn_output,
+                                   localFromTorch(out_proj->weight),
+                                   localFromTorch(out_proj->bias));
         
-        cerr << "output after projection = " << attn_output.sizes() << endl;
+        cerr << "output after projection = " << attn_output.sizes << endl;
         
         // output after projection = [1, 1030, 768]
-        
-        return localFromTorch(attn_output.contiguous()); //!!!
+
+        return attn_output;
+//        return localFromTorch(attn_output.contiguous()); //!!!
     }
     
 };
