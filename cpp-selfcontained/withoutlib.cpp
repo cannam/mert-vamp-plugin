@@ -13,38 +13,62 @@ struct Tensor {
     int64_t rank;
     ivec sizes;
     ivec strides;
-    fvec data;
 
-    static int64_t numelFor(const ivec &sizes_) {
-        int64_t n = 1;
-        for (auto i : sizes_) {
-            n *= i;
+    const float *data() const {
+        if (d_fixed) {
+            return d_fixed;
+        } else {
+            return d_vec.data();
         }
-        return n;
     }
-    
-    static Tensor empty(ivec sizes_) {
-        auto n = numelFor(sizes_);
-        int rank_ = sizes_.size();
-        Tensor t { rank_,
-                   sizes_,
-                   ivec(rank_, 0),
-                   fvec(n, 0.f) };
-        int64_t s = 1;
-        for (int64_t i = rank_ - 1; i >= 0; --i) {
-            t.strides[i] = s;
-            s *= t.sizes[i];
+
+    float *mutableData() {
+        if (d_fixed) {
+            throw std::runtime_error("not mutable");
+        } else {
+            return d_vec.data();
         }
-        return t;
+    }
+
+    fvec copiedData() const {
+        if (d_fixed) {
+            return fvec(d_fixed, d_fixed + numel());
+        } else {
+            return d_vec;
+        }
     }
     
     int64_t numel() const {
-        int64_t acc = 1;
-        for (auto i : sizes) {
-            acc *= i;
-        }
-        return acc;
+        return numelFor(sizes);
     }        
+
+    /// Null
+    Tensor() :
+        Tensor(ivec()) {
+    }
+    
+    /// Empty
+    Tensor(ivec sizes_) :
+        Tensor(sizes_, fvec(numelFor(sizes_), 0.f)) {
+    }
+
+    /// With data supplied
+    Tensor(ivec sizes_, fvec data_) :
+        rank(sizes_.size()),
+        sizes(sizes_),
+        strides(rank, 0),
+        d_fixed(nullptr),
+        d_vec(data_) {
+        calcStrides();
+        if (d_vec.size() != numel()) {
+            throw std::runtime_error("size");
+        }
+    }
+
+    /// With const data supplied
+    static Tensor fromConst(ivec sizes_, const float *data_) {
+        return Tensor(sizes_, data_);
+    }
 
     inline int64_t index(int64_t i) const {
         return i * strides[0];
@@ -60,53 +84,59 @@ struct Tensor {
     }
 
     inline float at(int64_t i) const {
-        return data[index(i)];
+        return data()[index(i)];
     }
     inline float at(int64_t i, int64_t j) const {
-        return data[index(i, j)];
+        return data()[index(i, j)];
     }
     inline float at(int64_t i, int64_t j, int64_t k) const {
-        return data[index(i, j, k)];
+        return data()[index(i, j, k)];
     }
     inline float at(int64_t i, int64_t j, int64_t k, int64_t m) const {
-        return data[index(i, j, k, m)];
+        return data()[index(i, j, k, m)];
+    }
+
+    Tensor(const Tensor &t) =default;
+    
+    Tensor &operator=(const Tensor &t) {
+        if (d_fixed) {
+            throw std::runtime_error("not mutable");
+        }
+        rank = t.rank;
+        sizes = t.sizes;
+        strides = t.strides;
+        d_vec = t.copiedData();
+        return *this;
+    }
+    
+private:
+    const float *const d_fixed;
+    fvec d_vec;
+
+    Tensor(ivec sizes_, const float *data_) :
+        rank(sizes_.size()),
+        sizes(sizes_),
+        d_fixed(data_) {
+        calcStrides();
+    }
+    
+    void calcStrides() {
+        strides = ivec(sizes.size(), 1);
+        int64_t s = 1;
+        for (int64_t i = rank - 1; i >= 0; --i) {
+            strides[i] = s;
+            s *= sizes[i];
+        }
+    }
+    
+    static int64_t numelFor(const ivec &sizes_) {
+        int64_t n = 1;
+        for (auto i : sizes_) {
+            n *= i;
+        }
+        return n;
     }
 };
-    
-template <typename T>
-Tensor tensorFromData(int64_t rank_,
-                      const int64_t *sizes_,
-                      const int64_t *strides_,
-                      const T *const data_) {
-    int64_t n = 1;
-    for (int64_t i = 0; i < rank_; ++i) {
-        n *= sizes_[i];
-    }
-    Tensor t { rank_,
-               Tensor::ivec(sizes_, sizes_ + rank_),
-               Tensor::ivec(strides_, strides_ + rank_),
-               Tensor::fvec(n, 0.f) };
-    for (int64_t i = 0; i < n; ++i) {
-        t.data[i] = static_cast<float>(data_[i]);
-    }
-    return t;
-}
-    
-template <>
-Tensor tensorFromData(int64_t rank_,
-                      const int64_t *sizes_,
-                      const int64_t *strides_,
-                      const float *const data_) {
-    int64_t n = 1;
-    for (int64_t i = 0; i < rank_; ++i) {
-        n *= sizes_[i];
-    }
-    Tensor t { rank_,
-               Tensor::ivec(sizes_, sizes_ + rank_),
-               Tensor::ivec(strides_, strides_ + rank_),
-               Tensor::fvec(data_, data_ + n) };
-    return t;
-}
 
 std::ostream &
 operator<<(std::ostream &out, const Tensor &t)
