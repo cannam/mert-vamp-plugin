@@ -94,31 +94,6 @@ void dump(const localnn::Tensor &tt, string filebase)
             }
         }
     }
-    
-/*
-    int nrows = t.sizes()[1];
-    int ncols = t.sizes()[2];
-    cerr << "writing " << nrows << "-row " << ncols << "-column csv to "
-         << filename << endl;
-    for (int j = 0; j < ncols; ++j) {
-        csv << j;
-        if (j + 1 < ncols) {
-            csv << ",";
-        } else {
-            csv << endl;
-        }
-    }
-    for (int i = 0; i < nrows; ++i) {
-        for (int j = 0; j < ncols; ++j) {
-            csv << v[i * ncols + j];
-            if (j + 1 < ncols) {
-                csv << ",";
-            } else {
-                csv << endl;
-            }
-        }
-    }
-*/
 }
 
 void dump(Tensor t, string filebase)
@@ -186,15 +161,6 @@ localnn::Tensor localLinear_(const localnn::Tensor &in,
     return out;
 }
 
-Tensor localLinear(Tensor x, Tensor weight, Tensor bias)
-{
-    auto tx = localFromTorch(x);
-    auto tw = localFromTorch(weight);
-    auto tb = localFromTorch(bias);
-    auto result = localLinear_(tx, tw, tb);
-    return torchFromLocal(result);
-}
-
 struct LayerBase : nn::Module {
     virtual localnn::Tensor forwardImpl(const localnn::Tensor &x) = 0;
 
@@ -228,15 +194,6 @@ void localGelu_(localnn::Tensor &t)
         x = x * 0.5 * (1.0 + std::erf(x * alpha));
         t.data[i] = float(x);
     }
-}
-    
-void localGelu(Tensor &tt)
-{
-    //!!! the fact that this .contiguous is necessary suggests we've
-    //!!! screwed up localFromTorch somehow
-    localnn::Tensor t = localFromTorch(tt.contiguous());
-    localGelu_(t);
-    tt = torchFromLocal(t);
 }
 
 // We always copy for reshape and transpose, because we can only
@@ -387,30 +344,6 @@ localnn::Tensor localConv1d_(const localnn::Tensor &t,
     return out;
 }
 
-Tensor localConv1d(Tensor tt, int64_t ch_in, int64_t ch_out, int64_t ksize,
-                   int64_t stride, int64_t padding, int64_t groups,
-                   Tensor weightt, Tensor *biasp)
-{
-    cerr << "in shape = " << tt.sizes() << endl;
-    cerr << "weight shape = " << weightt.sizes() << endl;
-    cerr << "groups = " << groups << endl;
-    
-    localnn::Tensor t = localFromTorch(tt.contiguous());
-    localnn::Tensor w = localFromTorch(weightt);
-
-    localnn::Tensor bias;
-    if (biasp) {
-        bias = localFromTorch(*biasp);
-    }
-
-    auto out = localConv1d_(t, ch_in, ch_out, ksize, stride, padding, groups,
-                            w, biasp ? &bias : nullptr);
-            
-    Tensor result = torchFromLocal(out);
-    cerr << "out shape = " << result.sizes() << endl;
-    return result;
-}
-
 void localSoftmax_(localnn::Tensor &t)
 {
     int64_t h = *t.sizes.rbegin();
@@ -480,19 +413,6 @@ void localLayerNorm_(localnn::Tensor &t,
     }
 }
 
-void localLayerNorm(Tensor &tt, Tensor weightt, Tensor biast,
-                    bool weightsPerInstance)
-{
-    // Fixed to last dimension
-    localnn::Tensor t = localFromTorch(tt.contiguous()); //!!!???
-    localnn::Tensor weight = localFromTorch(weightt);
-    localnn::Tensor bias = localFromTorch(biast);
-
-    localLayerNorm_(t, weight, bias, weightsPerInstance);
-    
-    tt = torchFromLocal(t);
-}
-
 localnn::Tensor localBMM_(const localnn::Tensor &t, const localnn::Tensor &m)
 {
     if (t.rank != 3 || m.rank != 3) {
@@ -525,16 +445,6 @@ localnn::Tensor localBMM_(const localnn::Tensor &t, const localnn::Tensor &m)
     }
 
     return out;
-}
-
-Tensor localBMM(Tensor tt, Tensor mt)
-{
-    localnn::Tensor t = localFromTorch(tt.contiguous()); //!!!???
-    localnn::Tensor m = localFromTorch(mt.contiguous());
-
-    auto out = localBMM_(t, m);
-    
-    return torchFromLocal(out);
 }
 
 struct HubertNoLayerNormConvLayerImpl : LayerBase {
