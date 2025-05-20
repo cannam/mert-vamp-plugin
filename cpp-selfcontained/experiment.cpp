@@ -26,7 +26,7 @@ static const vector<int64_t> convKernels { 10, 3, 3, 3, 3, 2, 2 };
 #include <cxxabi.h>
 #endif
 
-void dump(const localnn::Tensor &tt, string filebase)
+void dump(const Tensor &tt, string filebase)
 {
     string filename = filebase + ".csv";
     ofstream csv(filename);
@@ -74,10 +74,10 @@ void dump(const localnn::Tensor &tt, string filebase)
     }
 }
 
-void localLinearImpl(const localnn::Tensor &in, int64_t inbase,
-                     localnn::Tensor &out, int64_t outbase,
-                     const localnn::Tensor &weight,
-                     const localnn::Tensor &bias,
+void linearImpl(const Tensor &in, int64_t inbase,
+                     Tensor &out, int64_t outbase,
+                     const Tensor &weight,
+                     const Tensor &bias,
                      int64_t rank,
                      int64_t rix)
 {
@@ -101,7 +101,7 @@ void localLinearImpl(const localnn::Tensor &in, int64_t inbase,
     } else {
 #pragma omp parallel for
         for (int64_t i = 0; i < in.sizes[rix]; ++i) {
-            localLinearImpl(in, inbase + i * in.strides[rix],
+            linearImpl(in, inbase + i * in.strides[rix],
                             out, outbase + i * out.strides[rix],
                             weight, bias,
                             rank, rix + 1);
@@ -109,9 +109,9 @@ void localLinearImpl(const localnn::Tensor &in, int64_t inbase,
     }
 }
 
-localnn::Tensor localLinear_(const localnn::Tensor &in,
-                             const localnn::Tensor &weight,
-                             const localnn::Tensor &bias)
+Tensor linear(const Tensor &in,
+                             const Tensor &weight,
+                             const Tensor &bias)
 {
     auto rank = in.rank;
     auto outsizes = in.sizes;
@@ -119,10 +119,10 @@ localnn::Tensor localLinear_(const localnn::Tensor &in,
         throw std::runtime_error("not contiguous");
     }
     outsizes[rank-1] = weight.sizes[0];
-    auto out = localnn::Tensor(outsizes);
+    auto out = Tensor(outsizes);
     int rix = 0;
     while (in.sizes[rix] == 1) ++rix;
-    localLinearImpl(in, 0,
+    linearImpl(in, 0,
                     out, 0,
                     weight, bias,
                     rank, rix);
@@ -132,7 +132,7 @@ localnn::Tensor localLinear_(const localnn::Tensor &in,
 struct Module {
     virtual void prepare(string key) = 0;
 
-    localnn::Tensor loadData(string keybase, string suffix) {
+    Tensor loadData(string keybase, string suffix) {
         string key = keybase;
         if (suffix != "") {
             key += "." + suffix;
@@ -147,7 +147,7 @@ struct Module {
         vector<int64_t> sizes;
         if (const float *data = lookup_model_data(key, sizes)) {
             cerr << "succeeded" << endl;
-            return localnn::Tensor::fromConst(sizes, data);
+            return Tensor::fromConst(sizes, data);
         } else {
             cerr << "FAILED" << endl;
             throw std::runtime_error("failed to load data for key: " + key);
@@ -156,10 +156,10 @@ struct Module {
 };
 
 struct LayerBase : Module {
-    virtual localnn::Tensor forward(const localnn::Tensor &x) = 0;
+    virtual Tensor forward(const Tensor &x) = 0;
 };
 
-void localGelu_(localnn::Tensor &t)
+void gelu(Tensor &t)
 {
     const double alpha = M_SQRT1_2;
 
@@ -176,7 +176,7 @@ void localGelu_(localnn::Tensor &t)
 // We always copy for reshape and transpose, because we can only
 // handle contiguous layouts in some other functions
 
-localnn::Tensor localReshape(const localnn::Tensor &t, vector<int64_t> outsizes)
+Tensor reshape(const Tensor &t, vector<int64_t> outsizes)
 {
     for (int i = 0; i < outsizes.size(); ++i) {
         if (outsizes[i] < 0) {
@@ -189,10 +189,10 @@ localnn::Tensor localReshape(const localnn::Tensor &t, vector<int64_t> outsizes)
             break;
         }
     }
-    return localnn::Tensor(outsizes, t.copiedData());
+    return Tensor(outsizes, t.copiedData());
 }
 
-localnn::Tensor localTranspose12of3(const localnn::Tensor &t)
+Tensor transpose12of3(const Tensor &t)
 {
     if (t.rank != 3) {
         throw std::runtime_error("shape");
@@ -201,7 +201,7 @@ localnn::Tensor localTranspose12of3(const localnn::Tensor &t)
     int64_t b = t.sizes[1];
     int64_t c = t.sizes[2];
     vector<int64_t> outsizes = { a, c, b };
-    localnn::Tensor out = localnn::Tensor(outsizes);
+    Tensor out = Tensor(outsizes);
     const float *tdata = t.data();
     float *outdata = out.mutableData();
     for (int64_t i = 0; i < a; ++i) {
@@ -215,7 +215,7 @@ localnn::Tensor localTranspose12of3(const localnn::Tensor &t)
     return out;
 }
 
-localnn::Tensor localTranspose12of4(const localnn::Tensor &t)
+Tensor transpose12of4(const Tensor &t)
 {
     if (t.rank != 4) {
         throw std::runtime_error("shape");
@@ -225,7 +225,7 @@ localnn::Tensor localTranspose12of4(const localnn::Tensor &t)
     int64_t c = t.sizes[2];
     int64_t d = t.sizes[3];
     vector<int64_t> outsizes = { a, c, b, d };
-    localnn::Tensor out(outsizes);
+    Tensor out(outsizes);
     const float *tdata = t.data();
     float *outdata = out.mutableData();
     for (int64_t i = 0; i < a; ++i) {
@@ -241,11 +241,11 @@ localnn::Tensor localTranspose12of4(const localnn::Tensor &t)
     return out;
 }
 
-localnn::Tensor localConv1d_(const localnn::Tensor &t,
+Tensor conv1d(const Tensor &t,
                              int64_t ch_in, int64_t ch_out, int64_t ksize,
                              int64_t stride, int64_t padding, int64_t groups,
-                             const localnn::Tensor &w,
-                             const localnn::Tensor *bp)
+                             const Tensor &w,
+                             const Tensor *bp)
 {
     if (t.rank != 3 || t.strides[2] != 1) {
         throw std::runtime_error("unsupported format for input");
@@ -261,7 +261,7 @@ localnn::Tensor localConv1d_(const localnn::Tensor &t,
 
     cerr << "l_in = " << l_in << ", l_out = " << l_out << endl;
 
-    localnn::Tensor out({ t.sizes[0], ch_out, l_out });
+    Tensor out({ t.sizes[0], ch_out, l_out });
     
     const float *bbase = nullptr;
     if (bp) {
@@ -314,7 +314,7 @@ localnn::Tensor localConv1d_(const localnn::Tensor &t,
     return out;
 }
 
-void localSoftmax_(localnn::Tensor &t)
+void softmax(Tensor &t)
 {
     int64_t h = *t.sizes.rbegin();
     int64_t m = t.numel() / h;
@@ -337,8 +337,8 @@ void localSoftmax_(localnn::Tensor &t)
     }
 }
 
-void localLayerNorm_(localnn::Tensor &t,
-                     const localnn::Tensor &weight, const localnn::Tensor &bias,
+void layerNorm(Tensor &t,
+                     const Tensor &weight, const Tensor &bias,
                      bool weightsPerInstance)
 {
     int64_t h = *t.sizes.rbegin();
@@ -383,7 +383,7 @@ void localLayerNorm_(localnn::Tensor &t,
     }
 }
 
-localnn::Tensor localBMM_(const localnn::Tensor &t, const localnn::Tensor &m)
+Tensor bmm(const Tensor &t, const Tensor &m)
 {
     if (t.rank != 3 || m.rank != 3) {
         cerr << "unsupported rank (" << t.rank << " or "
@@ -391,7 +391,7 @@ localnn::Tensor localBMM_(const localnn::Tensor &t, const localnn::Tensor &m)
         throw std::runtime_error("shape");
     }        
     
-    localnn::Tensor out({ t.sizes[0], t.sizes[1], m.sizes[2] });
+    Tensor out({ t.sizes[0], t.sizes[1], m.sizes[2] });
 
     if (t.sizes[2] != m.sizes[1]) {
         cerr << "incompatible sizes (" << t.sizes[2] << " != "
@@ -420,7 +420,7 @@ localnn::Tensor localBMM_(const localnn::Tensor &t, const localnn::Tensor &m)
 
 struct HubertNoLayerNormConvLayer : LayerBase {
     int64_t layerId = 0;
-    localnn::Tensor weight;
+    Tensor weight;
 
     HubertNoLayerNormConvLayer(int64_t layerId_) : layerId(layerId_) { }
 
@@ -428,16 +428,16 @@ struct HubertNoLayerNormConvLayer : LayerBase {
         weight = loadData(key, "conv.weight");
     }
     
-    localnn::Tensor forward(const localnn::Tensor &x) override {
+    Tensor forward(const Tensor &x) override {
 
         int64_t inSize = 1;
         if (layerId > 0) inSize = convDimensions[layerId-1];
         int64_t outSize = convDimensions[layerId];
 
-        auto tmp = localConv1d_(x, inSize, outSize,
+        auto tmp = conv1d(x, inSize, outSize,
                                 convKernels[layerId], convStrides[layerId],
                                 0, 1, weight, nullptr);
-        localGelu_(tmp);
+        gelu(tmp);
         
         return tmp;
     }
@@ -446,9 +446,9 @@ struct HubertNoLayerNormConvLayer : LayerBase {
 struct HubertGroupNormConvLayer : LayerBase {
 
     int64_t layerId = 0;
-    localnn::Tensor convWeight;
-    localnn::Tensor normWeight;
-    localnn::Tensor normBias;
+    Tensor convWeight;
+    Tensor normWeight;
+    Tensor normBias;
     
     HubertGroupNormConvLayer(int64_t layerId_) : layerId(layerId_) { }
 
@@ -458,18 +458,18 @@ struct HubertGroupNormConvLayer : LayerBase {
         normBias = loadData(key, "layer_norm.bias");
     }
     
-    localnn::Tensor forward(const localnn::Tensor &x) override {
+    Tensor forward(const Tensor &x) override {
 
         int64_t inSize = 1;
         if (layerId > 0) inSize = convDimensions[layerId-1];
         int64_t outSize = convDimensions[layerId];
 
-        auto tmp = localConv1d_(x, inSize, outSize,
+        auto tmp = conv1d(x, inSize, outSize,
                                 convKernels[layerId], convStrides[layerId],
                                 0, 1, convWeight, nullptr);
 
-        localLayerNorm_(tmp, normWeight, normBias, true);
-        localGelu_(tmp);
+        layerNorm(tmp, normWeight, normBias, true);
+        gelu(tmp);
         
         return tmp;
     }
@@ -492,8 +492,8 @@ struct HubertFeatureEncoder : LayerBase {
         }
     }
 
-    localnn::Tensor forward(const localnn::Tensor &x) {
-        localnn::Tensor t = x;
+    Tensor forward(const Tensor &x) {
+        Tensor t = x;
         for (int i = 0; i < layers.size(); ++i) {
             t = layers[i]->forward(t);
         }
@@ -503,10 +503,10 @@ struct HubertFeatureEncoder : LayerBase {
 
 struct MERTFeatureProjection : LayerBase {
 
-    localnn::Tensor normWeight;
-    localnn::Tensor normBias;
-    localnn::Tensor linearWeight;
-    localnn::Tensor linearBias;
+    Tensor normWeight;
+    Tensor normBias;
+    Tensor linearWeight;
+    Tensor linearBias;
     
     MERTFeatureProjection() { }
 
@@ -517,10 +517,10 @@ struct MERTFeatureProjection : LayerBase {
         linearBias = loadData(key, "projection.bias");
     }
 
-    localnn::Tensor forward(const localnn::Tensor &x) {
-        localnn::Tensor t = x;
-        localLayerNorm_(t, normWeight, normBias, false);
-        t = localLinear_(t, linearWeight, linearBias);
+    Tensor forward(const Tensor &x) {
+        Tensor t = x;
+        layerNorm(t, normWeight, normBias, false);
+        t = linear(t, linearWeight, linearBias);
         return t;
     }
 };
@@ -531,7 +531,7 @@ struct HubertSamePadLayer : LayerBase {
 
     void prepare(string) override { }
     
-    localnn::Tensor forward(const localnn::Tensor &t) {
+    Tensor forward(const Tensor &t) {
         if (nConvPosEmbeddings % 2 != 0) {
             return t;
         }
@@ -541,7 +541,7 @@ struct HubertSamePadLayer : LayerBase {
         }
         auto outsizes = t.sizes;
         --(*outsizes.rbegin());
-        auto out = localnn::Tensor(outsizes);
+        auto out = Tensor(outsizes);
         auto tdata = t.data();
         auto outdata = out.mutableData();
         for (int i = 0; i < t.sizes[0]; ++i) {
@@ -560,8 +560,8 @@ struct HubertSamePadLayer : LayerBase {
 struct HubertPositionalConvEmbedding : LayerBase {
 
     HubertSamePadLayer padding;
-    localnn::Tensor weight;
-    localnn::Tensor bias;
+    Tensor weight;
+    Tensor bias;
     
     HubertPositionalConvEmbedding() { }
 
@@ -575,31 +575,31 @@ struct HubertPositionalConvEmbedding : LayerBase {
         padding.prepare(key + ".padding");
     }
 
-    localnn::Tensor forward(const localnn::Tensor &in) {
-        auto hidden_states = localTranspose12of3(in);
-        hidden_states = localConv1d_
+    Tensor forward(const Tensor &in) {
+        auto hidden_states = transpose12of3(in);
+        hidden_states = conv1d
             (hidden_states, hiddenSize, hiddenSize,
              nConvPosEmbeddings, 1, nConvPosEmbeddings/2,
              nConvPosEmbeddingGroups,
              weight, &bias);
 
         hidden_states = padding.forward(hidden_states);
-        localGelu_(hidden_states);
-        hidden_states = localTranspose12of3(hidden_states);
+        gelu(hidden_states);
+        hidden_states = transpose12of3(hidden_states);
         return hidden_states;
     }
 };
 
 struct HubertAttention : LayerBase {
 
-    localnn::Tensor kWeight;
-    localnn::Tensor kBias;
-    localnn::Tensor vWeight;
-    localnn::Tensor vBias;
-    localnn::Tensor qWeight;
-    localnn::Tensor qBias;
-    localnn::Tensor outWeight;
-    localnn::Tensor outBias;
+    Tensor kWeight;
+    Tensor kBias;
+    Tensor vWeight;
+    Tensor vBias;
+    Tensor qWeight;
+    Tensor qBias;
+    Tensor outWeight;
+    Tensor outBias;
     
     int64_t embed_dim;
     int64_t num_heads;
@@ -624,17 +624,17 @@ struct HubertAttention : LayerBase {
         outBias = loadData(key, "out_proj.bias");
     }
 
-    localnn::Tensor shape(const localnn::Tensor &x, int64_t seq_len, int64_t bsz) {
+    Tensor shape(const Tensor &x, int64_t seq_len, int64_t bsz) {
         vector<int64_t> dim { bsz, seq_len, num_heads, head_dim };
-        return localTranspose12of4(localReshape(x, dim));
+        return transpose12of4(reshape(x, dim));
     }
     
-    localnn::Tensor forward(const localnn::Tensor &hidden_states) {
+    Tensor forward(const Tensor &hidden_states) {
         
         auto bsz = hidden_states.sizes[0];
         auto tgt_len = hidden_states.sizes[1];
 
-        auto query_states = localLinear_(hidden_states, qWeight, qBias);
+        auto query_states = linear(hidden_states, qWeight, qBias);
 
         //!!!
         {
@@ -645,41 +645,41 @@ struct HubertAttention : LayerBase {
         }
 
         auto key_states =
-            shape(localLinear_(hidden_states, kWeight, kBias),
+            shape(linear(hidden_states, kWeight, kBias),
                   -1, bsz);
 
         auto value_states =
-            shape(localLinear_(hidden_states, vWeight, vBias),
+            shape(linear(hidden_states, vWeight, vBias),
                   -1, bsz);
 
         vector<int64_t> proj_shape { bsz * num_heads, -1, head_dim };
-        query_states = localReshape(shape(query_states, tgt_len, bsz), proj_shape);
+        query_states = reshape(shape(query_states, tgt_len, bsz), proj_shape);
         
-        key_states = localReshape(key_states, proj_shape);
-        value_states = localReshape(value_states, proj_shape);
+        key_states = reshape(key_states, proj_shape);
+        value_states = reshape(value_states, proj_shape);
         
         int64_t src_len = key_states.sizes[1];
-        auto attn_weights = localBMM_(query_states, localTranspose12of3(key_states));
+        auto attn_weights = bmm(query_states, transpose12of3(key_states));
 
         vector<int64_t> expected { bsz * num_heads, tgt_len, src_len };
         if (attn_weights.sizes != expected) {
             throw std::runtime_error("shape");
         }
 
-        localSoftmax_(attn_weights);
+        softmax(attn_weights);
 
-        auto attn_output = localBMM_(attn_weights, value_states);
+        auto attn_output = bmm(attn_weights, value_states);
         
         expected = { bsz * num_heads, tgt_len, head_dim };
         if (attn_output.sizes != expected) {
             throw std::runtime_error("shape");
         }
 
-        attn_output = localReshape(attn_output, { bsz, num_heads, tgt_len, head_dim });
+        attn_output = reshape(attn_output, { bsz, num_heads, tgt_len, head_dim });
 
-        attn_output = localTranspose12of4(attn_output);
-        attn_output = localReshape(attn_output, { bsz, tgt_len, embed_dim });
-        attn_output = localLinear_(attn_output, outWeight, outBias);
+        attn_output = transpose12of4(attn_output);
+        attn_output = reshape(attn_output, { bsz, tgt_len, embed_dim });
+        attn_output = linear(attn_output, outWeight, outBias);
 
         return attn_output;
     }
@@ -688,10 +688,10 @@ struct HubertAttention : LayerBase {
 
 struct HubertFeedForward : LayerBase {
 
-    localnn::Tensor intermediateWeight;
-    localnn::Tensor intermediateBias;
-    localnn::Tensor outputWeight;
-    localnn::Tensor outputBias;
+    Tensor intermediateWeight;
+    Tensor intermediateBias;
+    Tensor outputWeight;
+    Tensor outputBias;
 
     HubertFeedForward() { }
 
@@ -702,14 +702,14 @@ struct HubertFeedForward : LayerBase {
         outputBias = loadData(key, "output_dense.bias");
     }
 
-    localnn::Tensor forward(const localnn::Tensor &in) {
+    Tensor forward(const Tensor &in) {
 
-        auto hidden_states = localLinear_
+        auto hidden_states = linear
             (in, intermediateWeight, intermediateBias);
 
-        localGelu_(hidden_states);
+        gelu(hidden_states);
         
-        hidden_states = localLinear_
+        hidden_states = linear
             (hidden_states, outputWeight, outputBias);
         
         return hidden_states;
@@ -722,10 +722,10 @@ struct HubertEncoderLayer : LayerBase {
     HubertAttention attention;
     HubertFeedForward feed_forward;
 
-    localnn::Tensor normWeight;
-    localnn::Tensor normBias;
-    localnn::Tensor finalNormWeight;
-    localnn::Tensor finalNormBias;
+    Tensor normWeight;
+    Tensor normBias;
+    Tensor finalNormWeight;
+    Tensor finalNormBias;
 
     HubertEncoderLayer() { }
 
@@ -738,11 +738,11 @@ struct HubertEncoderLayer : LayerBase {
         feed_forward.prepare(key + ".feed_forward");
     }
 
-    localnn::Tensor forward(const localnn::Tensor &in) {
+    Tensor forward(const Tensor &in) {
         
-        localnn::Tensor attn_residual = in;
+        Tensor attn_residual = in;
 
-        localnn::Tensor hidden_states = attention.forward(in);
+        Tensor hidden_states = attention.forward(in);
 
         //!!! oh come on, let's have a function
         {
@@ -753,9 +753,9 @@ struct HubertEncoderLayer : LayerBase {
             }
         }
 
-        localLayerNorm_(hidden_states, normWeight, normBias, false);
+        layerNorm(hidden_states, normWeight, normBias, false);
 
-        localnn::Tensor ff = feed_forward.forward(hidden_states);
+        Tensor ff = feed_forward.forward(hidden_states);
 
         {
             auto fdata = ff.data();
@@ -765,7 +765,7 @@ struct HubertEncoderLayer : LayerBase {
             }
         }
 
-        localLayerNorm_(hidden_states, finalNormWeight, finalNormBias, false);
+        layerNorm(hidden_states, finalNormWeight, finalNormBias, false);
         
         return hidden_states;
     }
@@ -777,8 +777,8 @@ struct HubertEncoder : Module {
     HubertPositionalConvEmbedding pos_conv_embed;
     vector<shared_ptr<HubertEncoderLayer>> layers;
 
-    localnn::Tensor normWeight;
-    localnn::Tensor normBias;
+    Tensor normWeight;
+    Tensor normBias;
 
     HubertEncoder() {
         for (int i = 0; i < nHiddenLayers; ++i) {
@@ -795,7 +795,7 @@ struct HubertEncoder : Module {
         }
     }
     
-    vector<localnn::Tensor> forward(const localnn::Tensor &in) {
+    vector<Tensor> forward(const Tensor &in) {
 
         auto hidden_states = pos_conv_embed.forward(in);
 
@@ -807,9 +807,9 @@ struct HubertEncoder : Module {
             }
         }
 
-        localLayerNorm_(hidden_states, normWeight, normBias, false);
+        layerNorm(hidden_states, normWeight, normBias, false);
         
-        vector<localnn::Tensor> all_hidden_states;
+        vector<Tensor> all_hidden_states;
         all_hidden_states.push_back(hidden_states);
 
         for (int i = 0; i < layers.size(); ++i) {
@@ -835,9 +835,9 @@ struct MERT : Module {
         encoder.prepare(key + ".encoder");
     }
 
-    vector<localnn::Tensor> forward(const localnn::Tensor &input_values) {
+    vector<Tensor> forward(const Tensor &input_values) {
         auto features = featureExtractor.forward(input_values);
-        features = localTranspose12of3(features);
+        features = transpose12of3(features);
         auto hidden_states = featureProjection.forward(features);
         auto encoder_outputs = encoder.forward(hidden_states);
         return encoder_outputs;
@@ -875,9 +875,9 @@ int main(int argc, char **argv)
     cerr << "read " << data.size() << "-sample vector from test file "
          << testfile << endl;
 
-    localnn::Tensor input({ 1, 1, data.size() }, data);
+    Tensor input({ 1, 1, data.size() }, data);
     
-    vector<localnn::Tensor> output = mert.forward(input);
+    vector<Tensor> output = mert.forward(input);
 
     cerr << "received " << output.size() << " tensors as output" << endl;
 

@@ -4,8 +4,6 @@
 
 #include <vector>
 
-namespace localnn {
-
 struct Tensor {
     typedef std::vector<int64_t> ivec;
     typedef std::vector<float> fvec;
@@ -155,6 +153,5 @@ operator<<(std::ostream &out, const Tensor &t)
     return out;
 }
 
-}
 
 #endif
