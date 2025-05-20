@@ -411,6 +411,29 @@ Tensor localConv1d(Tensor tt, int64_t ch_in, int64_t ch_out, int64_t ksize,
     return result;
 }
 
+void localSoftmax_(localnn::Tensor &t)
+{
+    int64_t h = *t.sizes.rbegin();
+    int64_t m = t.numel() / h;
+
+    for (int64_t j = 0; j < m; ++j) {
+
+        float *base = t.data.data() + j * h;
+
+        double sum = 0.0;
+        for (int64_t i = 0; i < h; ++i) {
+            double x = exp(base[i]);
+            sum += x;
+            base[i] = x;
+        }
+        if (sum != 0.0) {
+            for (int64_t i = 0; i < h; ++i) {
+                base[i] /= sum;
+            }
+        }
+    }
+}
+
 void localLayerNorm_(localnn::Tensor &t,
                      const localnn::Tensor &weight, const localnn::Tensor &bias,
                      bool weightsPerInstance)
@@ -829,8 +852,7 @@ struct HubertAttentionImpl : LayerBase {
 
         // All masking etc omitted here (relevant only in training)
 
-        //!!!
-        attn_weights = localFromTorch(softmax(torchFromLocal(attn_weights), -1).contiguous());
+        localSoftmax_(attn_weights);
 
         auto attn_output = localBMM_(attn_weights, value_states);
         
