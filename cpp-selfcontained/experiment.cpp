@@ -636,13 +636,7 @@ struct HubertAttention : LayerBase {
 
         auto query_states = linear(hidden_states, qWeight, qBias);
 
-        //!!!
-        {
-            auto qdata = query_states.mutableData();
-            for (int64_t i = 0; i < query_states.numel(); ++i) {
-                qdata[i] *= scaling;
-            }
-        }
+        query_states *= scaling;
 
         auto key_states =
             shape(linear(hidden_states, kWeight, kBias),
@@ -744,26 +738,13 @@ struct HubertEncoderLayer : LayerBase {
 
         Tensor hidden_states = attention.forward(in);
 
-        //!!! oh come on, let's have a function
-        {
-            auto rdata = attn_residual.data();
-            auto hdata = hidden_states.mutableData();
-            for (int64_t i = 0; i < hidden_states.numel(); ++i) {
-                hdata[i] += rdata[i];
-            }
-        }
+        hidden_states += attn_residual;
 
         layerNorm(hidden_states, normWeight, normBias, false);
 
         Tensor ff = feed_forward.forward(hidden_states);
 
-        {
-            auto fdata = ff.data();
-            auto hdata = hidden_states.mutableData();
-            for (int64_t i = 0; i < hidden_states.numel(); ++i) {
-                hdata[i] += fdata[i];
-            }
-        }
+        hidden_states += ff;
 
         layerNorm(hidden_states, finalNormWeight, finalNormBias, false);
         
@@ -799,13 +780,7 @@ struct HubertEncoder : Module {
 
         auto hidden_states = pos_conv_embed.forward(in);
 
-        {
-            auto idata = in.data();
-            auto hdata = hidden_states.mutableData();
-            for (int64_t i = 0; i < hidden_states.numel(); ++i) {
-                hdata[i] += idata[i];
-            }
-        }
+        hidden_states += in;
 
         layerNorm(hidden_states, normWeight, normBias, false);
         

@@ -94,6 +94,33 @@ struct Tensor {
         return data()[index(i, j, k, m)];
     }
 
+    Tensor &operator +=(const Tensor &t) {
+        if (d_fixed) {
+            throw std::runtime_error("not mutable");
+        }
+        int64_t n = numel();
+        if (t.numel() != n) {
+            throw std::runtime_error("size");
+        }
+        const float *tdata = t.data();
+#pragma GCC ivdep
+        for (int64_t i = 0; i < n; ++i) {
+            d_vec[i] += tdata[i];
+        }
+        return *this;
+    }
+
+    Tensor &operator *=(float x) {
+        if (d_fixed) {
+            throw std::runtime_error("not mutable");
+        }
+        int64_t n = numel();
+        for (int64_t i = 0; i < n; ++i) {
+            d_vec[i] *= x;
+        }
+        return *this;
+    }        
+    
     Tensor(const Tensor &t) =default;
     
     Tensor &operator=(const Tensor &t) {
