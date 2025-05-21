@@ -9,6 +9,6 @@ LIBTORCH_DEP_LIBDIR := ${LIBTORCH_INSTALL}/lib64
 
 OPTS	:= -O3
 
-experiment:	experiment.cpp Makefile
-		g++ ${OPTS} experiment.cpp ../data/weights.a -o experiment -I${LIBTORCH_CSRC_INCDIR} -I${LIBTORCH_INCDIR} -I${LIBTORCH_CSRC_DIR} -L${LIBTORCH_LIBDIR} -L${LIBTORCH_DEP_LIBDIR} -Wl,--rpath ${LIBTORCH_LIBDIR} -ltorch -ltorch_cpu -lc10 -lsndfile ${OTHERLIBS}
+test:	main.cpp model.hpp Makefile
+	g++ ${OPTS} main.cpp ../data/weights.a -o $@ -I${LIBTORCH_CSRC_INCDIR} -I${LIBTORCH_INCDIR} -I${LIBTORCH_CSRC_DIR} -L${LIBTORCH_LIBDIR} -L${LIBTORCH_DEP_LIBDIR} -Wl,--rpath ${LIBTORCH_LIBDIR} -ltorch -ltorch_cpu -lc10 -lsndfile ${OTHERLIBS}
 

@@ -7,23 +7,13 @@
 #include <sndfile.h>
 
 #include "../data/weights.hpp"
+#include "../data/parameters.hpp"
 
 using namespace std;
 using namespace torch;
 
 // For inference only - I've omitted some logic that I believe is only
 // used in training (dropout, certain types of masking)
-
-static const int64_t vocabSize { 32 };
-static const int64_t hiddenSize { 768 };
-static const int64_t nHiddenLayers { 12 };
-static const int64_t nAttentionHeads { 12 };
-static const int64_t nConvPosEmbeddings { 128 };
-static const int64_t nConvPosEmbeddingGroups { 16 };
-static const int64_t intermediateSize { 3072 };
-static const vector<int64_t> convDimensions { 512, 512, 512, 512, 512, 512, 512 };
-static const vector<int64_t> convStrides { 5, 2, 2, 2, 2, 2, 2 };
-static const vector<int64_t> convKernels { 10, 3, 3, 3, 3, 2, 2 };
 
 //#define DEBUG_TENSOR_SHAPES 1
 

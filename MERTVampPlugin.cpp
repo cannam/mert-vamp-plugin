@@ -2,34 +2,13 @@
     MERT Vamp Plugin
     Chris Cannam, Queen Mary University of London
     Copyright (c) 2025 Queen Mary University of London
-
-    Permission is hereby granted, free of charge, to any person
-    obtaining a copy of this software and associated documentation
-    files (the "Software"), to deal in the Software without
-    restriction, including without limitation the rights to use, copy,
-    modify, merge, publish, distribute, sublicense, and/or sell copies
-    of the Software, and to permit persons to whom the Software is
-    furnished to do so, subject to the following conditions:
-
-    The above copyright notice and this permission notice shall be
-    included in all copies or substantial portions of the Software.
-
-    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
-    EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-    MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
-    NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY
-    CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF
-    CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
-    WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-
-    Except as contained in this notice, the names of the Centre for
-    Digital Music; Queen Mary, University of London; and Chris Cannam
-    shall not be used in advertising or otherwise to promote the sale,
-    use or other dealings in this Software without prior written
-    authorization.
 */
 
 #include "MERTVampPlugin.h"
+
+#include "data/parameters.hpp"
+
+#include "ext/qm-dsp/dsp/rateconversion/Resampler.h"
 
 #include "version.h"
 
@@ -39,11 +18,12 @@ using namespace std;
 
 static float defaultChunkDuration = 8.f;
 static bool defaultAdaptiveChunkStitching = true;
-static int defaultTransformerRounds = 12;
+static int defaultTransformerRounds = nHiddenLayers;
 
 MERTVampPlugin::MERTVampPlugin(float inputSampleRate) :
     Plugin(inputSampleRate),
     m_blockSize(0),
+    m_resampler(nullptr),
     m_chunkDuration(defaultChunkDuration),
     m_adaptiveChunkStitching(defaultAdaptiveChunkStitching),
     m_transformerRounds(defaultTransformerRounds)
@@ -52,6 +32,7 @@ MERTVampPlugin::MERTVampPlugin(float inputSampleRate) :
 
 MERTVampPlugin::~MERTVampPlugin()
 {
+    delete m_resampler;
 }
 
 string
@@ -87,8 +68,7 @@ MERTVampPlugin::getPluginVersion() const
 string
 MERTVampPlugin::getCopyright() const
 {
-    //!!! weights are CC-BY-NC 4.0
-    return "MIT/X11 licence";
+    return "Code GPL; trained weights CC-BY-NC 4.0";
 }
 
 MERTVampPlugin::InputDomain
@@ -118,7 +98,7 @@ MERTVampPlugin::getMinChannelCount() const
 size_t
 MERTVampPlugin::getMaxChannelCount() const
 {
-    return 1;
+    return 0;
 }
 
 MERTVampPlugin::ParameterList
@@ -129,7 +109,7 @@ MERTVampPlugin::getParameterDescriptors() const
     ParameterDescriptor d;
     d.identifier = "chunk";
     d.name = "Chunk duration";
-    d.description = "Duration in seconds of the chunks into which the audio will be split before encoding. Does not include any overlap required by the stitching method, and actual durations will be rounded to multiples of the processing block size. Longer chunks demand more memory to process.";
+    d.description = "Duration of the chunks into which the audio will be split before encoding. Does not include any overlap required by the stitching method. Longer chunks demand more memory to process.";
     d.unit = "s";
     d.minValue = 1;
     d.maxValue = 60;
@@ -154,7 +134,7 @@ MERTVampPlugin::getParameterDescriptors() const
     d.description = "Number of rounds of the transformer architecture to run. This defines how many of the plugin's feature outputs contain valid data. Higher-numbered rounds typically correspond to higher-level musical features. If you reduce this from the default to some N, the plugin will run more quickly but only the first N hidden-layer outputs will contain any values. The default has all outputs populated.";
     d.unit = "rounds";
     d.minValue = 0;
-    d.maxValue = 12;
+    d.maxValue = nHiddenLayers;
     d.defaultValue = defaultTransformerRounds;
     d.isQuantized = true;
     d.quantizeStep = 1;
@@ -218,17 +198,17 @@ MERTVampPlugin::getOutputDescriptors() const
     d.description = "Output from the convolutional preprocessor and positional embedding, as provided to the transformer as input.";
     d.unit = "";
     d.hasFixedBinCount = true;
-    d.binCount = 1; //!!! get these figures from the actual code
+    d.binCount = hiddenSize;
     d.hasKnownExtents = true;
     d.minValue = -1.f;
     d.maxValue = 1.f;
     d.isQuantized = false;
     d.sampleType = OutputDescriptor::FixedSampleRate;
-    d.sampleRate = 1000; //!!! again fill this in
+    d.sampleRate = 50.f;
     d.hasDuration = false;
     list.push_back(d);
 
-    for (int i = 0; i < 12; ++i) { //!!! and again
+    for (int i = 0; i < 12; ++i) {
         string is = to_string(i + 1);
         if (i + 1 < 10) is = "0" + is;
         d.identifier = "layer-" + is;
@@ -243,8 +223,7 @@ MERTVampPlugin::getOutputDescriptors() const
 bool
 MERTVampPlugin::initialise(size_t channels, size_t stepSize, size_t blockSize)
 {
-    if (channels < getMinChannelCount() ||
-	channels > getMaxChannelCount()) {
+    if (channels < getMinChannelCount()) {
         std::cerr << "MERTVampPlugin::initialise: unsupported channel count "
                   << channels << std::endl;
         return false;
@@ -257,22 +236,41 @@ MERTVampPlugin::initialise(size_t channels, size_t stepSize, size_t blockSize)
         return false;
     }
 
+    m_channels = channels;
+    m_blockSize = blockSize;
+    
+    reset();
+    
     return true;
 }
 
 void
 MERTVampPlugin::reset()
 {
-
+    delete m_resampler;
+    m_resampler = new Resampler(m_inputSampleRate, 16000);
+    m_chunk = {};
 }
 
 MERTVampPlugin::FeatureSet
 MERTVampPlugin::process(const float *const *inputBuffers,
-                       Vamp::RealTime timestamp)
+                        Vamp::RealTime timestamp)
 {
     FeatureSet fs;
-    
 
+    vector<double> rin(m_blockSize, 0.0);
+    for (int c = 0; c < m_channels; ++c) {
+        for (int i = 0; i < m_blockSize; ++i) {
+            rin[i] += inputBuffers[c][i];
+        }
+    }
+
+    auto rout = m_resampler->process(rin.data(), m_blockSize);
+
+    m_chunk.insert(m_chunk.end(), rout.begin(), rout.end());
+
+    
+    
     return fs;
 }
 

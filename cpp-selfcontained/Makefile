@@ -3,6 +3,6 @@ OPTS 	:= -O3 -fopenmp
 #OPTS	:= -g -fsanitize=address
 #OPTS	:= -g 
 
-experiment:	experiment.cpp withoutlib.cpp Makefile
-		g++ ${OPTS} experiment.cpp ../data/weights.a -o experiment -lsndfile ${OTHERLIBS}
+test:	main.cpp tensor.hpp model.hpp Makefile
+	g++ ${OPTS} main.cpp ../data/weights.a -o $@ -lsndfile ${OTHERLIBS}
 

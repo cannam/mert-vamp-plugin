@@ -5,6 +5,9 @@
     },
     "MERT-v1-95M": {
       "pin": "11578f29d5e7d7630ffa613f850abe1dbcd6141b"
+    },
+    "qm-dsp": {
+      "pin": "e34a3cc188332ed7c33cd9257ef164de5b587191"
     }
   }
 }
