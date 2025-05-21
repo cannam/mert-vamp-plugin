@@ -19,6 +19,8 @@ configure_file(input: 'version.h.in', output: 'version.h', configuration: conf)
 
 system = host_machine.system()
 
+openmp = dependency('openmp')
+
 plugin_files = [
   'MERTVampPlugin.cpp',
   'plugins.cpp',
@@ -88,6 +90,9 @@ plugin_library = shared_library(
   plugin_files,
   qmdsp_files,
   vamp_sdk_files,
+  dependencies: [
+    openmp,
+  ],
   include_directories: [
     'ext/vamp-plugin-sdk',
     'ext/qm-dsp',

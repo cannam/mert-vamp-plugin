@@ -12,4 +12,4 @@ static const int64_t intermediateSize { 3072 };
 static const std::vector<int64_t> convDimensions { 512, 512, 512, 512, 512, 512, 512 };
 static const std::vector<int64_t> convStrides { 5, 2, 2, 2, 2, 2, 2 };
 static const std::vector<int64_t> convKernels { 10, 3, 3, 3, 3, 2, 2 };
-
+static const int64_t processingSampleRate { 16000 };

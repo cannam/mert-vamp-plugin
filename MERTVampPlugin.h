@@ -9,6 +9,12 @@
 
 #include <vamp-sdk/Plugin.h>
 
+#ifdef USE_LIBTORCH
+#include "cpp-libtorch/model.hpp"
+#else
+#include "cpp-selfcontained/model.hpp"
+#endif
+
 class Resampler;
 
 class MERTVampPlugin : public Vamp::Plugin
@@ -49,6 +55,8 @@ public:
     FeatureSet getRemainingFeatures();
 
 protected:
+    MERT m_mert;
+    
     int m_channels;
     int m_blockSize;
     Resampler *m_resampler;
@@ -58,6 +66,8 @@ protected:
     int m_transformerRounds;
 
     std::vector<float> m_chunk;
+
+    void processChunk(FeatureSet &fs, int64_t length);
 };
 
 

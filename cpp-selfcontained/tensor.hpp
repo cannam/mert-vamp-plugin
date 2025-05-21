@@ -163,6 +163,7 @@ private:
     }
 };
 
+inline
 std::ostream &
 operator<<(std::ostream &out, const Tensor &t)
 {
@@ -284,8 +285,8 @@ struct Ops
         }
     }
 
-// We always copy for reshape and transpose, because we can only
-// handle contiguous layouts in some other functions
+    // We always copy for reshape and transpose, because we can only
+    // handle contiguous layouts in some other functions
 
     static Tensor reshape(const Tensor &t, std::vector<int64_t> outsizes)
     {

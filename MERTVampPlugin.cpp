@@ -6,8 +6,6 @@
 
 #include "MERTVampPlugin.h"
 
-#include "data/parameters.hpp"
-
 #include "ext/qm-dsp/dsp/rateconversion/Resampler.h"
 
 #include "version.h"
@@ -199,14 +197,16 @@ MERTVampPlugin::getOutputDescriptors() const
     d.unit = "";
     d.hasFixedBinCount = true;
     d.binCount = hiddenSize;
-    d.hasKnownExtents = true;
-    d.minValue = -1.f;
-    d.maxValue = 1.f;
+    d.hasKnownExtents = false; // for the conv output only
     d.isQuantized = false;
     d.sampleType = OutputDescriptor::FixedSampleRate;
     d.sampleRate = 50.f;
     d.hasDuration = false;
     list.push_back(d);
+
+    d.hasKnownExtents = true;
+    d.minValue = -1.f;
+    d.maxValue = 1.f;
 
     for (int i = 0; i < 12; ++i) {
         string is = to_string(i + 1);
@@ -236,8 +236,35 @@ MERTVampPlugin::initialise(size_t channels, size_t stepSize, size_t blockSize)
         return false;
     }
 
+    if (blockSize == 0) {
+        std::cerr << "MERTVampPlugin::initialise: zero block size!?"
+                  << std::endl;
+        return false;
+    }
+
+    bool firstTime = (m_blockSize == 0);
+    
     m_channels = channels;
     m_blockSize = blockSize;
+
+#ifdef USE_LIBTORCH
+    m_mert->eval();
+    auto params = m_mert->named_parameters();
+    for (auto &p : params) {
+        string key = p.key();
+        vector<int64_t> sizes;
+        if (auto data = lookup_model_data(key, sizes)) {
+            // This seems hazardous - we don't want to clone because
+            // we don't want to duplicate all the model data, but what
+            // if it's in a protected const segment? Do we just hope
+            // libtorch never tries to modify it?
+            Tensor t = torch::from_blob(const_cast<float *>(data), sizes);
+            params[key].set_data(t);
+        }
+    }
+#else
+    m_mert.prepare("");
+#endif
     
     reset();
     
@@ -248,7 +275,7 @@ void
 MERTVampPlugin::reset()
 {
     delete m_resampler;
-    m_resampler = new Resampler(m_inputSampleRate, 16000);
+    m_resampler = new Resampler(m_inputSampleRate, processingSampleRate);
     m_chunk = {};
 }
 
@@ -269,15 +296,62 @@ MERTVampPlugin::process(const float *const *inputBuffers,
 
     m_chunk.insert(m_chunk.end(), rout.begin(), rout.end());
 
+    int64_t chunkLength = round(m_chunkDuration * processingSampleRate);
     
+    while (m_chunk.size() > chunkLength) {
+        processChunk(fs, chunkLength);
+    }
     
     return fs;
+}
+
+void
+MERTVampPlugin::processChunk(FeatureSet &fs, int64_t length)
+{
+    vector<float> chunk(m_chunk.begin(), m_chunk.begin() + length);
+    m_chunk = vector<float>(m_chunk.begin() + length, m_chunk.end());
+
+#ifdef USE_LIBTORCH
+    //!!! + support rounds parameter
+    Tensor input = torch::from_blob
+        (chunk.data(), { 1, 1, int64_t(chunk.size()) }); // no need to clone
+    vector<Tensor> output = m_mert(input);
+    //...
+
+#else
+    Tensor input({ 1, 1, int64_t(chunk.size()) }, chunk);
+    cerr << "sending input of size " << chunk.size() << endl;
+    vector<Tensor> output = m_mert.forward(input, m_transformerRounds);
+    for (int64_t i = 0; i < output.size(); ++i) {
+        Tensor &t = output[i];
+        for (int64_t j = 0; j < t.sizes[0]; ++j) {
+            for (int64_t k = 0; k < t.sizes[1]; ++k) {
+                Feature f;
+                f.hasTimestamp = false;
+                int64_t ix0 = t.index(j, k);
+                int64_t ix1 = t.index(j, k + 1);
+                f.values = vector<float>(t.data() + ix0, t.data() + ix1);
+                fs[i].push_back(f);
+            }
+        }
+    }
+#endif
 }
 
 MERTVampPlugin::FeatureSet
 MERTVampPlugin::getRemainingFeatures()
 {
     FeatureSet fs;
+    
+    int64_t chunkLength = round(m_chunkDuration * processingSampleRate);
+    
+    while (m_chunk.size() > chunkLength) {
+        processChunk(fs, chunkLength);
+    }
+    if (m_chunk.size() > 0) {
+        processChunk(fs, m_chunk.size());
+    }
+    
     return fs;
 }
 

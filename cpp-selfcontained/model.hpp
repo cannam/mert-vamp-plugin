@@ -250,6 +250,8 @@ struct HubertAttention : LayerBase {
     }
     
     Tensor forward(const Tensor &hidden_states) {
+
+        std::cerr << "attention" << std::endl;
         
         auto bsz = hidden_states.sizes[0];
         auto tgt_len = hidden_states.sizes[1];
@@ -396,7 +398,7 @@ struct HubertEncoder : Module {
         }
     }
     
-    std::vector<Tensor> forward(const Tensor &in) {
+    std::vector<Tensor> forward(const Tensor &in, int64_t rounds = -1) {
 
         auto hidden_states = pos_conv_embed.forward(in);
 
@@ -407,7 +409,11 @@ struct HubertEncoder : Module {
         std::vector<Tensor> all_hidden_states;
         all_hidden_states.push_back(hidden_states);
 
-        for (int i = 0; i < layers.size(); ++i) {
+        if (rounds < 0 || rounds > layers.size()) {
+            rounds = layers.size();
+        }
+        
+        for (int i = 0; i < rounds; ++i) {
             hidden_states = layers[i]->forward(hidden_states);
             all_hidden_states.push_back(hidden_states);
         }
@@ -430,11 +436,11 @@ struct MERT : Module {
         encoder.prepare(key + ".encoder");
     }
 
-    std::vector<Tensor> forward(const Tensor &input_values) {
+    std::vector<Tensor> forward(const Tensor &input_values, int rounds = -1) {
         auto features = featureExtractor.forward(input_values);
         features = Ops::transpose12of3(features);
         auto hidden_states = featureProjection.forward(features);
-        auto encoder_outputs = encoder.forward(hidden_states);
+        auto encoder_outputs = encoder.forward(hidden_states, rounds);
         return encoder_outputs;
     }
 };
