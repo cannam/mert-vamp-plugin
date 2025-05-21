@@ -1,0 +1,2 @@
+#define PLUGIN_VERSION_STRING "@version@"
+#define PLUGIN_VERSION_INT @version@

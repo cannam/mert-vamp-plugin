@@ -1,0 +1,24 @@
+{
+    "config": {
+        "extdir": "ext"
+    },
+    "services": {
+        "huggingface": {
+            "vcs": ["git"],
+            "anonymous": "https://huggingface.co/{owner}/{repository}"
+        }
+    },
+    "libraries": {
+        "vamp-plugin-sdk": {
+            "vcs": "git",
+            "service": "github",
+            "owner": "vamp-plugins"
+        },
+        "MERT-v1-95M": {
+            "vcs": "git",
+            "service": "huggingface",
+            "owner": "m-a-p"
+        }
+    }
+}
+

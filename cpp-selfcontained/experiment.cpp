@@ -31,7 +31,6 @@ void dump(const Tensor &tt, string filebase)
     string filename = filebase + ".csv";
     ofstream csv(filename);
 
-    
     int base = tt.sizes.size() - 2;
     int nrows = 1;
     

@@ -1,11 +1,12 @@
 
 #include <torch/nn.h>
-#include <torch/serialize.h>
 
 #include <iostream>
 #include <fstream>
 
 #include <sndfile.h>
+
+#include "../data/weights.hpp"
 
 using namespace std;
 using namespace torch;
@@ -24,7 +25,8 @@ static const vector<int64_t> convDimensions { 512, 512, 512, 512, 512, 512, 512 
 static const vector<int64_t> convStrides { 5, 2, 2, 2, 2, 2, 2 };
 static const vector<int64_t> convKernels { 10, 3, 3, 3, 3, 2, 2 };
 
-#define DEBUG_TENSOR_SHAPES 1
+//#define DEBUG_TENSOR_SHAPES 1
+
 #ifdef DEBUG_TENSOR_SHAPES
 #include <cxxabi.h>
 #endif
@@ -43,12 +45,13 @@ void dump(Tensor t, string filebase)
     string filename = filebase + ".csv";
     ofstream csv(filename);
 
+#ifdef DEBUG_TENSOR_SHAPES
     cerr << "will dump tensor of sizes " << t.sizes() << endl;
+#endif
     
     int nrows = t.sizes()[1];
     int ncols = t.sizes()[2];
-    cerr << "writing " << nrows << "-row " << ncols << "-column csv to "
-         << filename << endl;
+
     for (int j = 0; j < ncols; ++j) {
         csv << j;
         if (j + 1 < ncols) {
@@ -67,6 +70,8 @@ void dump(Tensor t, string filebase)
             }
         }
     }
+
+    cerr << "wrote " << nrows << "x" << ncols << " output to " << filename << endl;
 }
 
 struct LayerBase : nn::Module {
@@ -284,17 +289,21 @@ struct HubertAttentionImpl : LayerBase {
         Tensor key_states = shape(k_proj(hidden_states), -1, bsz);
         Tensor value_states = shape(v_proj(hidden_states), -1, bsz);
 
+#ifdef DEBUG_TENSOR_SHAPES
         cerr << "q = " << query_states.sizes() << ", k = " << key_states.sizes()
              << ", v = " << value_states.sizes() << endl;
+#endif
         
         vector<int64_t> proj_shape { bsz * num_heads, -1, head_dim };
         query_states = shape(query_states, tgt_len, bsz).view(proj_shape);
         key_states = key_states.reshape(proj_shape);
         value_states = value_states.reshape(proj_shape);
 
+#ifdef DEBUG_TENSOR_SHAPES
         cerr << "q' = " << query_states.sizes() << ", k' = " << key_states.sizes()
              << ", v' = " << value_states.sizes() << endl;
-
+#endif
+        
         int64_t src_len = key_states.sizes()[1];
         Tensor attn_weights = bmm(query_states, key_states.transpose(1, 2));
 
@@ -316,23 +325,33 @@ struct HubertAttentionImpl : LayerBase {
                  << " but are of size " << attn_weights.sizes() << endl;
         }
 
+#ifdef DEBUG_TENSOR_SHAPES
         cerr << "output pre-reshape = " << attn_output.sizes() << endl;
+#endif
         
         attn_output = attn_output.view({ bsz, num_heads, tgt_len, head_dim });
 
+#ifdef DEBUG_TENSOR_SHAPES
         cerr << "output after view(" << bsz << "," << num_heads << "," << tgt_len << "," << head_dim << ") = " << attn_output.sizes() << endl;
+#endif
         
         attn_output = attn_output.transpose(1, 2);
 
+#ifdef DEBUG_TENSOR_SHAPES
         cerr << "output after transpose(1, 2) = " << attn_output.sizes() << endl;
+#endif
         
         attn_output = attn_output.reshape({ bsz, tgt_len, embed_dim });
 
+#ifdef DEBUG_TENSOR_SHAPES
         cerr << "output after reshape(" << bsz << "," << tgt_len << "," << embed_dim << ") = " << attn_output.sizes() << endl;
+#endif
         
         attn_output = out_proj(attn_output);
         
+#ifdef DEBUG_TENSOR_SHAPES
         cerr << "output after projection = " << attn_output.sizes() << endl;
+#endif
         
         return attn_output;
     }
@@ -470,52 +489,16 @@ int main(int argc, char **argv)
 
     auto params = mert->named_parameters();
 
-/*
-    cerr << "Model parameters are:" << endl;
-    for (const auto &i : params) {
-        cerr << i.key() << endl;
-    }
-*/
-    string pthfile = "../data/for_libtorch.pth";
-    ifstream saved(pthfile, ios::binary);
-    saved.seekg(0, ios::end);
-    auto size = saved.tellg();
-    saved.seekg(0, ios::beg);
-
-    cerr << "size = " << size << endl;
-    if (size <= 0) {
-        cerr << "Unable to open pickle model file " << pthfile << endl;
-        return 2;
-    }
-    
-    vector<char> buffer(size);
-    saved.read(buffer.data(), size);
-
-    if (saved) {
-        cerr << "read " << size << " chars" << endl;
-    } else {
-        cerr << "only read " << saved.gcount() << " of " << size << " chars"
-             << endl;
-        return 2;
-    }
-    
-    auto obj = pickle_load(buffer);
-
-    cerr << "Loaded the following:" << endl;
-    auto dict = obj.toGenericDict();
-    for (const auto &item : dict) {
-        if (!item.key().isString()) {
-            cerr << "(not a string key: " << item.key() << ")" << endl;
-            continue;
-        }
-        string key = *(item.key().toString());
-        auto value = item.value().toTensor();
-        cerr << key << " -> " << value.sizes();
-        if (params.contains(key)) {
-            params[key].set_data(value);
-            cerr << " - yes" << endl;
-        } else {
-            cerr << " - nope" << endl;
+    for (auto &p : params) {
+        string key = p.key();
+        vector<int64_t> sizes;
+        if (auto data = lookup_model_data(key, sizes)) {
+            // This seems hazardous - we don't want to clone because
+            // we don't want to duplicate all the model data, but what
+            // if it's in a protected const segment? Do we just hope
+            // libtorch never tries to modify it?
+            Tensor t = torch::from_blob(const_cast<float *>(data), sizes);
+            params[key].set_data(t);
         }
     }
 
