@@ -37,14 +37,16 @@
 
 using namespace std;
 
+static float defaultChunkDuration = 8.f;
+static bool defaultAdaptiveChunkStitching = true;
+static int defaultTransformerRounds = 12;
+
 MERTVampPlugin::MERTVampPlugin(float inputSampleRate) :
-    Plugin(inputSampleRate)
-    /*!!!,
-    m_blockSize(512),
-    m_imageWidth(172),
-    m_lossyCount(0),
-    m_totalCount(0)
-    */
+    Plugin(inputSampleRate),
+    m_blockSize(0),
+    m_chunkDuration(defaultChunkDuration),
+    m_adaptiveChunkStitching(defaultAdaptiveChunkStitching),
+    m_transformerRounds(defaultTransformerRounds)
 {
 }
 
@@ -123,18 +125,68 @@ MERTVampPlugin::ParameterList
 MERTVampPlugin::getParameterDescriptors() const
 {
     ParameterList list;
+
+    ParameterDescriptor d;
+    d.identifier = "chunk";
+    d.name = "Chunk duration";
+    d.description = "Duration in seconds of the chunks into which the audio will be split before encoding. Does not include any overlap required by the stitching method, and actual durations will be rounded to multiples of the processing block size. Longer chunks demand more memory to process.";
+    d.unit = "s";
+    d.minValue = 1;
+    d.maxValue = 60;
+    d.defaultValue = defaultChunkDuration;
+    d.isQuantized = false;
+    list.push_back(d);
+
+    d.identifier = "stitch";
+    d.name = "Chunk stitching";
+    d.description = "Method used to stitch chunks after processing. Adaptive means to add an overlap between chunks and choose a stitch position at a minimum difference between them. Naive means to make each chunk exactly the chunk duration.";
+    d.unit = "";
+    d.minValue = 0;
+    d.maxValue = 1;
+    d.defaultValue = (defaultAdaptiveChunkStitching ? 1 : 0);
+    d.isQuantized = true;
+    d.quantizeStep = 1;
+    d.valueNames = { "Naive", "Adaptive" };
+    list.push_back(d);
+
+    d.identifier = "rounds";
+    d.name = "Transformer rounds";
+    d.description = "Number of rounds of the transformer architecture to run. This defines how many of the plugin's feature outputs contain valid data. Higher-numbered rounds typically correspond to higher-level musical features. If you reduce this from the default to some N, the plugin will run more quickly but only the first N hidden-layer outputs will contain any values. The default has all outputs populated.";
+    d.unit = "rounds";
+    d.minValue = 0;
+    d.maxValue = 12;
+    d.defaultValue = defaultTransformerRounds;
+    d.isQuantized = true;
+    d.quantizeStep = 1;
+    d.valueNames = {};
+    list.push_back(d);
+    
     return list;
 }
 
 float
-MERTVampPlugin::getParameter(string) const
+MERTVampPlugin::getParameter(string name) const
 {
+    if (name == "chunk") {
+        return m_chunkDuration;
+    } else if (name == "stitch") {
+        return m_adaptiveChunkStitching ? 1.f : 0.f;
+    } else if (name == "rounds") {
+        return m_transformerRounds;
+    }
     return 0;
 }
 
 void
-MERTVampPlugin::setParameter(string, float) 
+MERTVampPlugin::setParameter(string name, float value) 
 {
+    if (name == "chunk") {
+        m_chunkDuration = value;
+    } else if (name == "stitch") {
+        m_adaptiveChunkStitching = (value > 0.5f);
+    } else if (name == "rounds") {
+        m_transformerRounds = round(value);
+    }
 }
 
 MERTVampPlugin::ProgramList
@@ -160,25 +212,31 @@ MERTVampPlugin::getOutputDescriptors() const
 {
     OutputList list;
 
-    int outputNo = 0;
-/*!!!
     OutputDescriptor d;
-    d.identifier = "lossy";
-    d.name = "Lossy";
-    d.description = "A single estimate for whether the input has been lossily encoded in the past or not. 1 indicates yes it has, 0 indicates no it hasn't.";
+    d.identifier = "conv";
+    d.name = "Convolutional embedding";
+    d.description = "Output from the convolutional preprocessor and positional embedding, as provided to the transformer as input.";
     d.unit = "";
     d.hasFixedBinCount = true;
-    d.binCount = 1;
+    d.binCount = 1; //!!! get these figures from the actual code
     d.hasKnownExtents = true;
-    d.minValue = 0.f;
+    d.minValue = -1.f;
     d.maxValue = 1.f;
-    d.isQuantized = true;
-    d.quantizeStep = 1.f;
-    d.sampleType = OutputDescriptor::VariableSampleRate;
-    d.hasDuration = true;
-    m_lossyOutput = outputNo++;
+    d.isQuantized = false;
+    d.sampleType = OutputDescriptor::FixedSampleRate;
+    d.sampleRate = 1000; //!!! again fill this in
+    d.hasDuration = false;
     list.push_back(d);
-*/
+
+    for (int i = 0; i < 12; ++i) { //!!! and again
+        string is = to_string(i + 1);
+        if (i + 1 < 10) is = "0" + is;
+        d.identifier = "layer-" + is;
+        d.name = "Hidden layer " + is + " state";
+        d.description = "Output from transformer layer " + is + ". Will only be returned if the \"rounds\" parameter of the plugin is set to at least " + is + ".";
+        list.push_back(d);
+    }
+    
     return list;
 }
 
@@ -205,12 +263,7 @@ MERTVampPlugin::initialise(size_t channels, size_t stepSize, size_t blockSize)
 void
 MERTVampPlugin::reset()
 {
-    /*!!!
-    m_buildingImage = {};
-    m_lossyCount = 0;
-    m_totalCount = 0;
-    m_lastTimestamp = Vamp::RealTime::zeroTime;
-    */
+
 }
 
 MERTVampPlugin::FeatureSet

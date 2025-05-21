@@ -72,16 +72,12 @@ public:
     FeatureSet getRemainingFeatures();
 
 protected:
-    /*
-    mutable int m_lossyOutput;
-    mutable int m_functionOutput;
     int m_blockSize;
-    int m_imageWidth;
-    t_2 m_buildingImage;
-    int m_lossyCount;
-    int m_totalCount;
     Vamp::RealTime m_lastTimestamp;
-    */
+
+    float m_chunkDuration;
+    bool m_adaptiveChunkStitching;
+    int m_transformerRounds;
 };
 
 
