@@ -183,6 +183,37 @@ operator<<(std::ostream &out, const Tensor &t)
 
 struct Ops
 {
+    static Tensor mm(const Tensor &a, const Tensor &b)
+    {
+        if (a.rank != 2 || b.rank != 2) {
+            std::cerr << "unsupported rank (" << a.rank << " or "
+                      << b.rank << ", should both be 2)" << std::endl;
+            throw std::runtime_error("shape");
+        }
+        int64_t sa0 = a.sizes[0], sa1 = a.sizes[1];
+        int64_t sb0 = b.sizes[0], sb1 = b.sizes[1];
+        if (sa1 != sb0) {
+            std::cerr << "incompatible sizes (" << sa1 << " != "
+                 << sb0 << ")" << std::endl;
+            throw std::runtime_error("shape");
+        }
+        Tensor out({ sa0, sb1 });
+        const float *adata = a.data();
+        const float *bdata = b.data();
+        float *outdata = out.mutableData();
+#pragma omp parallel for
+        for (int64_t i = 0; i < sa0; ++i) {
+            for (int64_t j = 0; j < sb1; ++j) {
+                float x = 0.0;
+                for (int64_t k = 0; k < sb0; ++k) {
+                    x += adata[a.index(i, k)] * bdata[b.index(k, j)];
+                }
+                outdata[out.index(i, j)] = x;
+            }
+        }
+        return out;
+    }
+    
     static Tensor bmm(const Tensor &t, const Tensor &m)
     {
         if (t.rank != 3 || m.rank != 3) {
@@ -202,16 +233,16 @@ struct Ops
         float *outdata = out.mutableData();
     
         for (int64_t b = 0; b < t.sizes[0]; ++b) {
-#pragma omp parallel for
-            for (int64_t i = 0; i < t.sizes[1]; ++i) {
-                for (int64_t j = 0; j < m.sizes[2]; ++j) {
-                    double d = 0.0;
+            Tensor tmp_t = Tensor::fromConst
+                ({ t.sizes[1], t.sizes[2] }, t.data() + t.index(b));
+            Tensor tmp_m = Tensor::fromConst
+                ({ m.sizes[1], m.sizes[2] }, m.data() + m.index(b));
+            Tensor tmp_out = mm(tmp_t, tmp_m);
+            const float *tmpdata = tmp_out.data();
+            int64_t n = tmp_out.numel();
 #pragma GCC ivdep
-                    for (int64_t k = 0; k < m.sizes[1]; ++k) {
-                        d += t.at(b, i, k) * m.at(b, k, j);
-                    }
-                    outdata[out.index(b, i, j)] = d;
-                }
+            for (int64_t i = 0; i < n; ++i) {
+                outdata[out.index(b) + i] = tmpdata[i];
             }
         }
 
@@ -394,9 +425,9 @@ struct Ops
                             w.data() + w.index(c + c0, k);
                         const float *const tbase =
                             t.data() + t.index(b, k + k0);
-#pragma GCC ivdep
                         for (int64_t i = 0; i < ksize; ++i) {
                             if (padding == 0) {
+#pragma GCC ivdep
                                 for (int64_t x = 0; x < l_out; ++x) {
                                     outbase[x] += wbase[i] * tbase[x * stride + i];
                                 }
