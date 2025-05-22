@@ -80,7 +80,7 @@ struct Tensor {
         d_fixed(nullptr),
         d_vec(data_) {
         calcStrides();
-        if (d_vec.size() != numel()) {
+        if (int64_t(d_vec.size()) != numel()) {
             throw std::runtime_error("size");
         }
     }
@@ -345,10 +345,10 @@ struct Ops
 
     static Tensor reshape(const Tensor &t, std::vector<int64_t> outsizes)
     {
-        for (int i = 0; i < outsizes.size(); ++i) {
+        for (int i = 0; i < int(outsizes.size()); ++i) {
             if (outsizes[i] < 0) {
                 outsizes[i] = t.numel();
-                for (int j = 0; j < outsizes.size(); ++j) {
+                for (int j = 0; j < int(outsizes.size()); ++j) {
                     if (j != i && outsizes[j] > 0) {
                         outsizes[i] /= outsizes[j];
                     }

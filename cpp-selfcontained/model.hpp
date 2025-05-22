@@ -110,20 +110,20 @@ struct HubertFeatureEncoder : LayerBase {
 
     HubertFeatureEncoder() {
         layers.push_back(std::make_shared<HubertGroupNormConvLayer>(0));
-        for (int i = 1; i < convDimensions.size(); ++i) {
+        for (int i = 1; i < int(convDimensions.size()); ++i) {
             layers.push_back(std::make_shared<HubertNoLayerNormConvLayer>(i));
         }
     }
 
     void prepare(std::string key) override {
-        for (int i = 0; i < layers.size(); ++i) {
+        for (int i = 0; i < int(layers.size()); ++i) {
             layers[i]->prepare(key + ".conv_layers." + std::to_string(i));
         }
     }
 
     Tensor forward(const Tensor &x) override {
         Tensor t = x;
-        for (int i = 0; i < layers.size(); ++i) {
+        for (int i = 0; i < int(layers.size()); ++i) {
             t = layers[i]->forward(t);
         }
         return t;
@@ -416,7 +416,7 @@ struct HubertEncoder : Module {
         std::vector<Tensor> all_hidden_states;
         all_hidden_states.push_back(hidden_states);
 
-        if (rounds < 0 || rounds > layers.size()) {
+        if (rounds < 0 || rounds > int(layers.size())) {
             rounds = layers.size();
         }
         

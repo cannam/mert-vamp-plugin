@@ -249,24 +249,26 @@ MERTVampPlugin::initialise(size_t channels, size_t stepSize, size_t blockSize)
     m_channels = channels;
     m_blockSize = blockSize;
 
+    if (firstTime) {
 #ifdef USE_LIBTORCH
-    m_mert->eval();
-    auto params = m_mert->named_parameters();
-    for (auto &p : params) {
-        string key = p.key();
-        vector<int64_t> sizes;
-        if (auto data = lookup_model_data(key, sizes)) {
-            // This seems hazardous - we don't want to clone because
-            // we don't want to duplicate all the model data, but what
-            // if it's in a protected const segment? Do we just hope
-            // libtorch never tries to modify it?
-            at::Tensor t = torch::from_blob(const_cast<float *>(data), sizes);
-            params[key].set_data(t);
+        m_mert->eval();
+        auto params = m_mert->named_parameters();
+        for (auto &p : params) {
+            string key = p.key();
+            vector<int64_t> sizes;
+            if (auto data = lookup_model_data(key, sizes)) {
+                // This seems hazardous - we don't want to clone because
+                // we don't want to duplicate all the model data, but what
+                // if it's in a protected const segment? Do we just hope
+                // libtorch never tries to modify it?
+                at::Tensor t = torch::from_blob(const_cast<float *>(data), sizes);
+                params[key].set_data(t);
+            }
         }
-    }
 #else
-    m_mert.prepare("");
+        m_mert.prepare("");
 #endif
+    }
     
     reset();
     
@@ -300,7 +302,7 @@ MERTVampPlugin::process(const float *const *inputBuffers,
 
     int64_t chunkLength = round(m_chunkDuration * processingSampleRate);
     
-    while (m_chunk.size() > chunkLength) {
+    while (int64_t(m_chunk.size()) > chunkLength) {
         processChunk(fs, chunkLength);
     }
     
@@ -318,7 +320,7 @@ MERTVampPlugin::processChunk(FeatureSet &fs, int64_t length)
     at::Tensor input = torch::from_blob
         (chunk.data(), { 1, 1, int64_t(chunk.size()) }); // no need to clone
     vector<at::Tensor> output = m_mert(input);
-    for (int64_t i = 0; i < output.size(); ++i) {
+    for (int64_t i = 0; i < int64_t(output.size()); ++i) {
         at::Tensor t = output[i].to(at::kCPU).contiguous();
         const float *data = t.data_ptr<float>();
         auto sz = t.sizes();
@@ -338,7 +340,7 @@ MERTVampPlugin::processChunk(FeatureSet &fs, int64_t length)
     Tensor input({ 1, 1, int64_t(chunk.size()) }, chunk);
     cerr << "sending input of size " << chunk.size() << endl;
     vector<Tensor> output = m_mert.forward(input, m_transformerRounds);
-    for (int64_t i = 0; i < output.size(); ++i) {
+    for (int64_t i = 0; i < int64_t(output.size()); ++i) {
         Tensor &t = output[i];
         const float *data = t.constData();
         for (int64_t j = 0; j < t.sizes[0]; ++j) {
@@ -362,7 +364,7 @@ MERTVampPlugin::getRemainingFeatures()
     
     int64_t chunkLength = round(m_chunkDuration * processingSampleRate);
     
-    while (m_chunk.size() > chunkLength) {
+    while (int64_t(m_chunk.size()) > chunkLength) {
         processChunk(fs, chunkLength);
     }
     if (m_chunk.size() > 0) {
