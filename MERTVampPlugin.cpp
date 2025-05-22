@@ -8,6 +8,8 @@
 
 #include "ext/qm-dsp/dsp/rateconversion/Resampler.h"
 
+#include "../data/weights.hpp"
+
 #include "version.h"
 
 #include <cmath>
@@ -258,7 +260,7 @@ MERTVampPlugin::initialise(size_t channels, size_t stepSize, size_t blockSize)
             // we don't want to duplicate all the model data, but what
             // if it's in a protected const segment? Do we just hope
             // libtorch never tries to modify it?
-            Tensor t = torch::from_blob(const_cast<float *>(data), sizes);
+            at::Tensor t = torch::from_blob(const_cast<float *>(data), sizes);
             params[key].set_data(t);
         }
     }
@@ -313,11 +315,11 @@ MERTVampPlugin::processChunk(FeatureSet &fs, int64_t length)
 
 #ifdef USE_LIBTORCH
     //!!! + support rounds parameter
-    Tensor input = torch::from_blob
+    at::Tensor input = torch::from_blob
         (chunk.data(), { 1, 1, int64_t(chunk.size()) }); // no need to clone
-    vector<Tensor> output = m_mert(input);
+    vector<at::Tensor> output = m_mert(input);
     for (int64_t i = 0; i < output.size(); ++i) {
-        Tensor t = output[i].to(kCPU).contiguous();
+        at::Tensor t = output[i].to(at::kCPU).contiguous();
         const float *data = t.data_ptr<float>();
         auto sz = t.sizes();
         auto st = t.strides();
@@ -326,7 +328,7 @@ MERTVampPlugin::processChunk(FeatureSet &fs, int64_t length)
                 Feature f;
                 f.hasTimestamp = false;
                 int64_t ix0 = j * st[0] + k * st[1];
-                int64_t ix0 = j * st[0] + (k + 1) * st[1];
+                int64_t ix1 = j * st[0] + (k + 1) * st[1];
                 f.values = vector<float>(data + ix0, data + ix1);
                 fs[i].push_back(f);
             }

@@ -7,7 +7,7 @@ project(
   license: 'MIT',
   default_options: [
     'cpp_std=c++17',
-    'warning_level=2',
+    'warning_level=1',
     'buildtype=release',
     'b_ndebug=if-release',
   ],
@@ -18,29 +18,105 @@ conf.set('version', meson.project_version())
 configure_file(input: 'version.h.in', output: 'version.h', configuration: conf)
 
 system = host_machine.system()
+architecture = host_machine.cpu_family()
 
-openmp = dependency('openmp', required: false)
+libtorch_path = get_option('libtorch_path')
+mkl_path = get_option('mkl_path')
+
+config_summary = { 'System': system,
+                   'Architecture': architecture,
+                   'C++ Compiler': meson.get_compiler('cpp').get_id(),
+                   'LibTorch Path': libtorch_path,
+                   'MKL Path': mkl_path,
+                 }
+
+openmp_dep = dependency('openmp', required: false)
 
 feature_defines = []
+feature_libs = []
 general_defines = []
 general_link_args = []
 
 if system == 'darwin'
-  feature_defines += [
-    '-DUSE_CBLAS',
-    '-DACCELERATE_NEW_LAPACK=1',
-    '-DUSE_DISPATCH',
-  ]
   general_defines += [
     '-mmacosx-version-min=10.15',
     '-Wno-unknown-pragmas',
   ]
   general_link_args += [
     '-mmacosx-version-min=10.15',
-    '-framework', 'Accelerate',
   ]
 endif
 
+if libtorch_path != ''
+  feature_defines += [
+    '-DUSE_LIBTORCH',
+    '-I' + libtorch_path / 'include',
+    '-I' + libtorch_path / 'include/torch/csrc',
+    '-I' + libtorch_path / 'include/torch/csrc/api/include',
+  ]
+  feature_libs += [
+    '-L' + libtorch_path / 'lib',
+    '-Wl,--rpath', libtorch_path / 'lib',
+    '-ltorch', '-ltorch_cpu', '-lc10',
+  ]
+  config_summary += {
+    'Computation': 'Torch',
+    'Threading': 'Torch',
+  }
+elif system == 'darwin'
+  feature_defines += [
+    '-DUSE_CBLAS',
+    '-DACCELERATE_NEW_LAPACK=1',
+    '-DUSE_DISPATCH',
+  ]
+  feature_libs += [
+    '-framework', 'Accelerate',
+  ]
+  config_summary += {
+    'Computation': 'Accelerate',
+    'Threading': 'Dispatch',
+  }
+else
+  if openmp_dep.found()
+    feature_defines += [
+      '-fopenmp',
+    ]
+    feature_libs += [
+      '-fopenmp',
+    ]
+    config_summary += {
+      'Threading': 'OpenMP',
+    }
+  else
+    config_summary += {
+      'Threading': '(none)'
+    }
+  endif # end openmp_dep
+  
+  if mkl_path != ''
+    feature_defines += [
+      '-DUSE_CBLAS',
+      '-DUSE_MKL',
+      '-I' + mkl_path / 'include',
+      '-I' + mkl_path / 'include/mkl'
+    ]
+    feature_libs += [
+      '-L' + (mkl_path / 'lib'),
+      '-Wl,-Bstatic',
+      '-lmkl_intel_lp64', '-lmkl_gnu_thread', '-lmkl_core',
+      '-Wl,-Bdynamic',
+    ]
+    config_summary += {
+      'Computation': 'MKL',
+    }
+  else
+    config_summary += {
+      'Matrix Library': '(none)'
+    }
+  endif # end not mkl_path
+  
+endif # end not darwin
+  
 plugin_files = [
   'MERTVampPlugin.cpp',
   'plugins.cpp',
@@ -118,7 +194,7 @@ plugin_library = shared_library(
     general_defines,
   ],
   dependencies: [
-    openmp,
+    openmp_dep,
   ],
   include_directories: [
     'ext/vamp-plugin-sdk',
@@ -130,8 +206,11 @@ plugin_library = shared_library(
   link_args: [
     vamp_symbol_args,
     general_link_args,
+    feature_libs,
   ],
   name_prefix: '',
   install: true,
   install_dir: vamp_install_dir,
 )  
+
+summary(config_summary, section: 'Configuration', bool_yn: true)
