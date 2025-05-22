@@ -316,21 +316,36 @@ MERTVampPlugin::processChunk(FeatureSet &fs, int64_t length)
     Tensor input = torch::from_blob
         (chunk.data(), { 1, 1, int64_t(chunk.size()) }); // no need to clone
     vector<Tensor> output = m_mert(input);
-    //...
-
+    for (int64_t i = 0; i < output.size(); ++i) {
+        Tensor t = output[i].to(kCPU).contiguous();
+        const float *data = t.data_ptr<float>();
+        auto sz = t.sizes();
+        auto st = t.strides();
+        for (int64_t j = 0; j < sz[0]; ++j) {
+            for (int64_t k = 0; k < sz[1]; ++k) {
+                Feature f;
+                f.hasTimestamp = false;
+                int64_t ix0 = j * st[0] + k * st[1];
+                int64_t ix0 = j * st[0] + (k + 1) * st[1];
+                f.values = vector<float>(data + ix0, data + ix1);
+                fs[i].push_back(f);
+            }
+        }
+    }
 #else
     Tensor input({ 1, 1, int64_t(chunk.size()) }, chunk);
     cerr << "sending input of size " << chunk.size() << endl;
     vector<Tensor> output = m_mert.forward(input, m_transformerRounds);
     for (int64_t i = 0; i < output.size(); ++i) {
         Tensor &t = output[i];
+        const float *data = t.data();
         for (int64_t j = 0; j < t.sizes[0]; ++j) {
             for (int64_t k = 0; k < t.sizes[1]; ++k) {
                 Feature f;
                 f.hasTimestamp = false;
                 int64_t ix0 = t.index(j, k);
                 int64_t ix1 = t.index(j, k + 1);
-                f.values = vector<float>(t.data() + ix0, t.data() + ix1);
+                f.values = vector<float>(data + ix0, data + ix1);
                 fs[i].push_back(f);
             }
         }
