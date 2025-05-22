@@ -1,0 +1,10 @@
+
+option('libtorch_path',
+       type: 'string',
+       value: '',
+       description: 'Path to LibTorch installation. Leave empty if LibTorch is not to be used.')
+
+option('mkl_path',
+       type: 'string',
+       value: '',
+       description: 'Path to Intel MKL libraries. Leave empty if MKL is not to be used. This is only referred to if libtorch_path is not set and the Accelerate framework is not available.')

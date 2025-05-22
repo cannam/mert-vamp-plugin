@@ -4,3 +4,14 @@ pytorch_model.bin
 __pycache__
 *~
 *.rej
+*.o
+*.a
+build/
+*.csv
+*.svg
+*.orig
+experiment
+test
+*.pth
+ext/
+.repoint*
