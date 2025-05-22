@@ -338,7 +338,7 @@ MERTVampPlugin::processChunk(FeatureSet &fs, int64_t length)
     vector<Tensor> output = m_mert.forward(input, m_transformerRounds);
     for (int64_t i = 0; i < output.size(); ++i) {
         Tensor &t = output[i];
-        const float *data = t.data();
+        const float *data = t.constData();
         for (int64_t j = 0; j < t.sizes[0]; ++j) {
             for (int64_t k = 0; k < t.sizes[1]; ++k) {
                 Feature f;

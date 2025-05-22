@@ -12,7 +12,7 @@ struct Tensor {
     ivec sizes;
     ivec strides;
 
-    const float *data() const {
+    const float *constData() const {
         if (d_fixed) {
             return d_fixed;
         } else {
@@ -82,16 +82,16 @@ struct Tensor {
     }
 
     inline float at(int64_t i) const {
-        return data()[index(i)];
+        return constData()[index(i)];
     }
     inline float at(int64_t i, int64_t j) const {
-        return data()[index(i, j)];
+        return constData()[index(i, j)];
     }
     inline float at(int64_t i, int64_t j, int64_t k) const {
-        return data()[index(i, j, k)];
+        return constData()[index(i, j, k)];
     }
     inline float at(int64_t i, int64_t j, int64_t k, int64_t m) const {
-        return data()[index(i, j, k, m)];
+        return constData()[index(i, j, k, m)];
     }
 
     Tensor &operator +=(const Tensor &t) {
@@ -102,7 +102,7 @@ struct Tensor {
         if (t.numel() != n) {
             throw std::runtime_error("size");
         }
-        const float *tdata = t.data();
+        const float *tdata = t.constData();
 #pragma GCC ivdep
         for (int64_t i = 0; i < n; ++i) {
             d_vec[i] += tdata[i];
@@ -198,8 +198,8 @@ struct Ops
             throw std::runtime_error("shape");
         }
         Tensor out({ sa0, sb1 });
-        const float *adata = a.data();
-        const float *bdata = b.data();
+        const float *adata = a.constData();
+        const float *bdata = b.constData();
         float *outdata = out.mutableData();
 #pragma omp parallel for
         for (int64_t i = 0; i < sa0; ++i) {
@@ -234,11 +234,11 @@ struct Ops
     
         for (int64_t b = 0; b < t.sizes[0]; ++b) {
             Tensor tmp_t = Tensor::fromConst
-                ({ t.sizes[1], t.sizes[2] }, t.data() + t.index(b));
+                ({ t.sizes[1], t.sizes[2] }, t.constData() + t.index(b));
             Tensor tmp_m = Tensor::fromConst
-                ({ m.sizes[1], m.sizes[2] }, m.data() + m.index(b));
+                ({ m.sizes[1], m.sizes[2] }, m.constData() + m.index(b));
             Tensor tmp_out = mm(tmp_t, tmp_m);
-            const float *tmpdata = tmp_out.data();
+            const float *tmpdata = tmp_out.constData();
             int64_t n = tmp_out.numel();
 #pragma GCC ivdep
             for (int64_t i = 0; i < n; ++i) {
@@ -256,9 +256,9 @@ struct Ops
                            int64_t rank,
                            int64_t rix)
     {
-        const float *indata = in.data();
-        const float *wdata = weight.data();
-        const float *bdata = bias.data();
+        const float *indata = in.constData();
+        const float *wdata = weight.constData();
+        const float *bdata = bias.constData();
         float *outdata = out.mutableData();
         if (rix + 1 == rank) {
             const int64_t insize = in.sizes[rix];
@@ -345,7 +345,7 @@ struct Ops
         int64_t c = t.sizes[2];
         std::vector<int64_t> outsizes = { a, c, b };
         Tensor out = Tensor(outsizes);
-        const float *tdata = t.data();
+        const float *tdata = t.constData();
         float *outdata = out.mutableData();
         for (int64_t i = 0; i < a; ++i) {
             for (int64_t j = 0; j < b; ++j) {
@@ -369,7 +369,7 @@ struct Ops
         int64_t d = t.sizes[3];
         std::vector<int64_t> outsizes = { a, c, b, d };
         Tensor out(outsizes);
-        const float *tdata = t.data();
+        const float *tdata = t.constData();
         float *outdata = out.mutableData();
         for (int64_t i = 0; i < a; ++i) {
             for (int64_t j = 0; j < b; ++j) {
@@ -406,7 +406,7 @@ struct Ops
     
         const float *bbase = nullptr;
         if (bp) {
-            bbase = bp->data();
+            bbase = bp->constData();
         }
 
         for (int64_t b = 0; b < t.sizes[0]; ++b) {
@@ -422,9 +422,9 @@ struct Ops
 
                     for (int64_t k = 0; k < ch_in / groups; ++k) {
                         const float *const wbase =
-                            w.data() + w.index(c + c0, k);
+                            w.constData() + w.index(c + c0, k);
                         const float *const tbase =
-                            t.data() + t.index(b, k + k0);
+                            t.constData() + t.index(b, k + k0);
                         for (int64_t i = 0; i < ksize; ++i) {
                             if (padding == 0) {
 #pragma GCC ivdep

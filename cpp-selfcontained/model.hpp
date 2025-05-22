@@ -162,7 +162,7 @@ struct HubertSamePadLayer : LayerBase {
         auto outsizes = t.sizes;
         --(*outsizes.rbegin());
         auto out = Tensor(outsizes);
-        auto tdata = t.data();
+        auto tdata = t.constData();
         auto outdata = out.mutableData();
         for (int i = 0; i < t.sizes[0]; ++i) {
             for (int j = 0; j < t.sizes[1]; ++j) {
