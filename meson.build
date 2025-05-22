@@ -66,7 +66,7 @@ if libtorch_path != ''
 elif system == 'darwin'
   feature_defines += [
     '-DUSE_CBLAS',
-    '-DACCELERATE_NEW_LAPACK=1',
+    '-DUSE_ACCELERATE',
     '-DUSE_DISPATCH',
   ]
   feature_libs += [

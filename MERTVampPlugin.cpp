@@ -98,7 +98,7 @@ MERTVampPlugin::getMinChannelCount() const
 size_t
 MERTVampPlugin::getMaxChannelCount() const
 {
-    return 0;
+    return 1;
 }
 
 MERTVampPlugin::ParameterList
@@ -284,8 +284,7 @@ MERTVampPlugin::reset()
 }
 
 MERTVampPlugin::FeatureSet
-MERTVampPlugin::process(const float *const *inputBuffers,
-                        Vamp::RealTime timestamp)
+MERTVampPlugin::process(const float *const *inputBuffers, Vamp::RealTime)
 {
     FeatureSet fs;
 
@@ -312,6 +311,9 @@ MERTVampPlugin::process(const float *const *inputBuffers,
 void
 MERTVampPlugin::processChunk(FeatureSet &fs, int64_t length)
 {
+    if (length > int64_t(m_chunk.size())) {
+        length = m_chunk.size();
+    }
     vector<float> chunk(m_chunk.begin(), m_chunk.begin() + length);
     m_chunk = vector<float>(m_chunk.begin() + length, m_chunk.end());
 

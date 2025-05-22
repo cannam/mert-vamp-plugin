@@ -4,22 +4,12 @@
 
 #include <vector>
 
-#if defined(USE_MKL)
-
+#if defined (USE_MKL)
 #include <mkl_cblas.h>
-
-#if !defined(USE_CBLAS)
-#define USE_CBLAS
-#endif
-
-#elif defined(USE_CBLAS)
-
-#if defined(ACCELERATE_NEW_LAPACK)
+#elif defined (USE_ACCELERATE)
 #include <Accelerate/Accelerate.h>
-#else
+#elif defined (USE_CBLAS)
 #include <cblas.h>
-#endif
-
 #endif
 
 #if defined(USE_DISPATCH)

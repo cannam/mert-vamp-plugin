@@ -1,5 +1,5 @@
 
-OPTS 	:= -O3 -DUSE_CBLAS -DACCELERATE_NEW_LAPACK=1 -DUSE_DISPATCH -I/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/Frameworks/Accelerate.framework/Versions/Current/Frameworks/vecLib.framework/Headers
+OPTS 	:= -O3 -DUSE_CBLAS -DUSE_ACCELERATE -DUSE_DISPATCH -DACCELERATE_NEW_LAPACK=1 -I/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/Frameworks/Accelerate.framework/Versions/Current/Frameworks/vecLib.framework/Headers
 
 OTHERLIBS	:= -framework Accelerate
 
