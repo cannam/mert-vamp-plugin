@@ -4,6 +4,20 @@
 
 #include <vector>
 
+#if defined(USE_MKL)
+
+#include <mkl_cblas.h>
+
+#if !defined(USE_CBLAS)
+#define USE_CBLAS
+#endif
+
+#elif defined(USE_CBLAS)
+
+#include <cblas.h>
+
+#endif
+
 struct Tensor {
     typedef std::vector<int64_t> ivec;
     typedef std::vector<float> fvec;
@@ -183,7 +197,7 @@ operator<<(std::ostream &out, const Tensor &t)
 
 struct Ops
 {
-    static Tensor mm(const Tensor &a, const Tensor &b)
+    static Tensor mm(const Tensor &a, const Tensor &b, bool bTransposed)
     {
         if (a.rank != 2 || b.rank != 2) {
             std::cerr << "unsupported rank (" << a.rank << " or "
@@ -192,25 +206,50 @@ struct Ops
         }
         int64_t sa0 = a.sizes[0], sa1 = a.sizes[1];
         int64_t sb0 = b.sizes[0], sb1 = b.sizes[1];
+        if (bTransposed) { sb0 = b.sizes[1]; sb1 = b.sizes[0]; }
         if (sa1 != sb0) {
-            std::cerr << "incompatible sizes (" << sa1 << " != "
-                 << sb0 << ")" << std::endl;
+            std::cerr << "incompatible sizes ("
+                      << a.sizes[0] << "x" << a.sizes[1]
+                      << ") and ("
+                      << b.sizes[0] << "x" << b.sizes[1]
+                      << ") (" << sa1 << " != " << sb0
+                      << ") [bTransposed = " << bTransposed << "]"
+                      << std::endl;
             throw std::runtime_error("shape");
         }
         Tensor out({ sa0, sb1 });
         const float *adata = a.constData();
         const float *bdata = b.constData();
         float *outdata = out.mutableData();
+
+#ifdef USE_CBLAS
+        cblas_sgemm(CblasRowMajor,
+                    CblasNoTrans,
+                    bTransposed ? CblasTrans : CblasNoTrans,
+                    sa0, sb1, sb0, 1.f,
+                    adata, a.sizes[1],
+                    bdata, b.sizes[1],
+                    0.f,
+                    outdata, out.sizes[1]);
+#else
 #pragma omp parallel for
         for (int64_t i = 0; i < sa0; ++i) {
             for (int64_t j = 0; j < sb1; ++j) {
                 float x = 0.0;
-                for (int64_t k = 0; k < sb0; ++k) {
-                    x += adata[a.index(i, k)] * bdata[b.index(k, j)];
-                }
+                if (bTransposed) {
+                    for (int64_t k = 0; k < sb0; ++k) {
+                        x += adata[a.index(i, k)] * bdata[b.index(j, k)];
+                    }
+                } else {
+                    for (int64_t k = 0; k < sb0; ++k) {
+                        x += adata[a.index(i, k)] * bdata[b.index(k, j)];
+                    }
+                }                    
                 outdata[out.index(i, j)] = x;
             }
         }
+#endif
+        
         return out;
     }
     
@@ -237,7 +276,7 @@ struct Ops
                 ({ t.sizes[1], t.sizes[2] }, t.constData() + t.index(b));
             Tensor tmp_m = Tensor::fromConst
                 ({ m.sizes[1], m.sizes[2] }, m.constData() + m.index(b));
-            Tensor tmp_out = mm(tmp_t, tmp_m);
+            Tensor tmp_out = mm(tmp_t, tmp_m, false);
             const float *tmpdata = tmp_out.constData();
             int64_t n = tmp_out.numel();
 #pragma GCC ivdep
@@ -249,58 +288,35 @@ struct Ops
         return out;
     }
 
-    static void linearImpl(const Tensor &in, int64_t inbase,
-                           Tensor &out, int64_t outbase,
-                           const Tensor &weight,
-                           const Tensor &bias,
-                           int64_t rank,
-                           int64_t rix)
-    {
-        const float *indata = in.constData();
-        const float *wdata = weight.constData();
-        const float *bdata = bias.constData();
-        float *outdata = out.mutableData();
-        if (rix + 1 == rank) {
-            const int64_t insize = in.sizes[rix];
-            const int64_t outsize = out.sizes[rix];
-#pragma omp parallel for
-            for (int64_t j = 0; j < outsize; ++j) {
-                float x = 0.f;
-#pragma GCC ivdep
-                for (int64_t i = 0; i < insize; ++i) {
-                    x += wdata[j * insize + i] * indata[inbase + i];
-                }
-                x += bdata[j];
-                outdata[outbase + j] = x;
-            }
-        } else {
-#pragma omp parallel for
-            for (int64_t i = 0; i < in.sizes[rix]; ++i) {
-                linearImpl(in, inbase + i * in.strides[rix],
-                           out, outbase + i * out.strides[rix],
-                           weight, bias,
-                           rank, rix + 1);
-            }
-        }
-    }
-
-    static Tensor linear(const Tensor &in,
+    static Tensor linear(const Tensor &t,
                          const Tensor &weight,
                          const Tensor &bias)
     {
-        auto rank = in.rank;
-        auto outsizes = in.sizes;
-        if (in.strides[rank-1] != 1) {
-            throw std::runtime_error("not contiguous");
+        if (t.rank != 3) {
+            std::cerr << "unsupported rank " << t.rank << " for linear" << std::endl;
+            throw std::runtime_error("shape");
         }
-        outsizes[rank-1] = weight.sizes[0];
+        auto outsizes = t.sizes;
+        outsizes[2] = weight.sizes[0];
         auto out = Tensor(outsizes);
-        int rix = 0;
-        while (in.sizes[rix] == 1) ++rix;
-        linearImpl(in, 0,
-                   out, 0,
-                   weight, bias,
-                   rank, rix);
+        const float *bdata = bias.constData();
+        float *outdata = out.mutableData();
+        for (int64_t b = 0; b < t.sizes[0]; ++b) {
+            Tensor tmp_t = Tensor::fromConst
+                ({ t.sizes[1], t.sizes[2] }, t.constData() + t.index(b));
+            Tensor tmp_out = mm(tmp_t, weight, true);
+            const float *tmpdata = tmp_out.constData();
+            int64_t n = tmp_out.numel();
+#pragma GCC ivdep
+            for (int64_t i = 0; i < n; ++i) {
+                outdata[out.index(b) + i] = tmpdata[i];
+            }
+            for (int64_t i = 0; i < out.sizes[1]; ++i) {
+                for (int64_t j = 0; j < out.sizes[2]; ++j) {
+                    outdata[out.index(b, i, j)] += bdata[j];
+                }
+            }
+        }
         return out;
     }
 
