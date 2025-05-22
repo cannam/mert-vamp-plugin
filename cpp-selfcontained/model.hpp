@@ -8,6 +8,8 @@
 #include "../data/weights.hpp"
 #include "../data/parameters.hpp"
 
+//#define REPORT_LOADING 1
+
 struct Module {
     virtual void prepare(std::string key) = 0;
 
@@ -22,13 +24,19 @@ struct Module {
         if (key[0] == '.') {
             key = key.substr(1);
         }
+#ifdef REPORT_LOADING
         std::cerr << "Loading: " << key << " ... ";
+#endif
         std::vector<int64_t> sizes;
         if (const float *data = lookup_model_data(key, sizes)) {
+#ifdef REPORT_LOADING
             std::cerr << "succeeded" << std::endl;
+#endif
             return Tensor::fromConst(sizes, data);
         } else {
+#ifdef REPORT_LOADING
             std::cerr << "FAILED" << std::endl;
+#endif
             throw std::runtime_error("failed to load data for key: " + key);
         }
     }

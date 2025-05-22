@@ -1,0 +1,12 @@
+
+# This build will be awfully slow
+
+OPTS            := -O3 
+
+OTHERLIBS	:= 
+
+test:	main.cpp tensor.hpp model.hpp Makefile.generic
+	g++ ${OPTS} main.cpp ../data/weights.a -o $@ -lsndfile ${OTHERLIBS}
+
+clean:
+	rm test
