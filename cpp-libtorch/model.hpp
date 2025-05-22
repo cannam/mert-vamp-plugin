@@ -219,7 +219,7 @@ struct HubertAttentionImpl : LayerBase {
     }
     
     at::Tensor forwardImpl(at::Tensor hidden_states) {
-
+        
         // "Input shape: Batch x Time x Channel"
         auto bsz = hidden_states.sizes()[0];
         auto tgt_len = hidden_states.sizes()[1];

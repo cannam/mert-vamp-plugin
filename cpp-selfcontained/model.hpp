@@ -55,8 +55,8 @@ struct HubertNoLayerNormConvLayer : LayerBase {
         int64_t outSize = convDimensions[layerId];
 
         auto tmp = Ops::conv1d(x, inSize, outSize,
-                                convKernels[layerId], convStrides[layerId],
-                                0, 1, weight, nullptr);
+                               convKernels[layerId], convStrides[layerId],
+                               0, 1, weight, nullptr);
         Ops::gelu(tmp);
         
         return tmp;
@@ -85,8 +85,8 @@ struct HubertGroupNormConvLayer : LayerBase {
         int64_t outSize = convDimensions[layerId];
 
         auto tmp = Ops::conv1d(x, inSize, outSize,
-                                convKernels[layerId], convStrides[layerId],
-                                0, 1, convWeight, nullptr);
+                               convKernels[layerId], convStrides[layerId],
+                               0, 1, convWeight, nullptr);
 
         Ops::layerNorm(tmp, normWeight, normBias, true);
         Ops::gelu(tmp);
@@ -251,8 +251,6 @@ struct HubertAttention : LayerBase {
     
     Tensor forward(const Tensor &hidden_states) {
 
-        std::cerr << "attention" << std::endl;
-        
         auto bsz = hidden_states.sizes[0];
         auto tgt_len = hidden_states.sizes[1];
 

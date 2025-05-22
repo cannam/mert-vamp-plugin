@@ -419,11 +419,6 @@ struct Ops
         int64_t l_out = (l_in + 2 * padding - (ksize - 1) - 1) / stride + 1;
 
         Tensor out({ t.sizes[0], ch_out, l_out });
-    
-        const float *bbase = nullptr;
-        if (bp) {
-            bbase = bp->constData();
-        }
 
         for (int64_t b = 0; b < t.sizes[0]; ++b) {
             for (int64_t g = 0; g < groups; ++g) {
@@ -441,24 +436,38 @@ struct Ops
                             w.constData() + w.index(c + c0, k);
                         const float *const tbase =
                             t.constData() + t.index(b, k + k0);
-                        for (int64_t i = 0; i < ksize; ++i) {
-                            if (padding == 0) {
+                        
+                        if (padding == 0) {
+                            for (int64_t i = 0; i < ksize; ++i) {
+                                const float w = wbase[i];
+                                if (stride == 2) {
+                                    const float *off = tbase + i;
 #pragma GCC ivdep
-                                for (int64_t x = 0; x < l_out; ++x) {
-                                    outbase[x] += wbase[i] * tbase[x * stride + i];
+                                    for (int64_t x = 0; x < l_out; ++x) {
+                                        outbase[x] += w * (*off);
+                                        off += 2;
+                                    }
+                                } else {
+#pragma GCC ivdep
+                                    for (int64_t x = 0; x < l_out; ++x) {
+                                        outbase[x] += w * tbase[x * stride + i];
+                                    }
                                 }
-                            } else {
+                            }
+                        } else {
+                            for (int64_t i = 0; i < ksize; ++i) {
+                                const float w = wbase[i];
                                 // ew
                                 for (int64_t x = 0; x < l_out; ++x) {
                                     int64_t x0 = x * stride + i - padding;
                                     if (x0 < 0 || x0 >= l_in) continue;
-                                    outbase[x] += wbase[i] * tbase[x0];
+                                    outbase[x] += w * tbase[x0];
                                 }
                             }
                         }
                     }
-
-                    if (bbase) {
+                    if (bp) {
+                        const float *bbase = bp->constData();
 #pragma GCC ivdep
                         for (int64_t x = 0; x < l_out; ++x) {
                             outbase[x] += bbase[c + c0];
