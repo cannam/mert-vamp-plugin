@@ -63,7 +63,6 @@ int main(int argc, char **argv)
 
     mert.prepare("");
 
-//    string testfile = "stairway-intro-16k-mono.wav";
     string testfile = "../data/testfile.wav";
     
     SF_INFO sfinfo;
