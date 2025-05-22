@@ -19,7 +19,27 @@ configure_file(input: 'version.h.in', output: 'version.h', configuration: conf)
 
 system = host_machine.system()
 
-openmp = dependency('openmp')
+openmp = dependency('openmp', required: false)
+
+feature_defines = []
+general_defines = []
+general_link_args = []
+
+if system == 'darwin'
+  feature_defines += [
+    '-DUSE_CBLAS',
+    '-DACCELERATE_NEW_LAPACK=1',
+    '-DUSE_DISPATCH',
+  ]
+  general_defines += [
+    '-mmacosx-version-min=10.15',
+    '-Wno-unknown-pragmas',
+  ]
+  general_link_args += [
+    '-mmacosx-version-min=10.15',
+    '-framework', 'Accelerate',
+  ]
+endif
 
 plugin_files = [
   'MERTVampPlugin.cpp',
@@ -83,6 +103,9 @@ install_data(
 weight_archive = static_library(
   'weights',
   weight_files,
+  cpp_args: [
+    general_defines,
+  ],
 )
   
 plugin_library = shared_library(
@@ -90,6 +113,10 @@ plugin_library = shared_library(
   plugin_files,
   qmdsp_files,
   vamp_sdk_files,
+  cpp_args: [
+    feature_defines,
+    general_defines,
+  ],
   dependencies: [
     openmp,
   ],
@@ -102,6 +129,7 @@ plugin_library = shared_library(
   ],
   link_args: [
     vamp_symbol_args,
+    general_link_args,
   ],
   name_prefix: '',
   install: true,

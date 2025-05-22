@@ -14,8 +14,16 @@
 
 #elif defined(USE_CBLAS)
 
+#if defined(ACCELERATE_NEW_LAPACK)
+#include <Accelerate/Accelerate.h>
+#else
 #include <cblas.h>
+#endif
 
+#endif
+
+#if defined(USE_DISPATCH)
+#include <dispatch/dispatch.h>
 #endif
 
 struct Tensor {
@@ -419,17 +427,27 @@ struct Ops
         int64_t l_out = (l_in + 2 * padding - (ksize - 1) - 1) / stride + 1;
 
         Tensor out({ t.sizes[0], ch_out, l_out });
+        float *const outdata = out.mutableData();
+
+#ifdef USE_DISPATCH
+        dispatch_queue_t queue = dispatch_get_global_queue
+            (DISPATCH_QUEUE_PRIORITY_DEFAULT, 0);
+#endif
 
         for (int64_t b = 0; b < t.sizes[0]; ++b) {
             for (int64_t g = 0; g < groups; ++g) {
                 int c0 = g * (ch_out / groups);
                 int k0 = g * (ch_in / groups);
                 int g0 = g * ((out.numel() / t.sizes[0]) / groups);
+
+#ifdef USE_DISPATCH
+                dispatch_apply(ch_out / groups, queue, ^(size_t c) {
+#else
 #pragma omp parallel for
                 for (int64_t c = 0; c < ch_out / groups; ++c) {
+#endif
 
-                    float *const outbase =
-                        out.mutableData() + g0 + out.index(b, c);
+                    float *const outbase = outdata + g0 + out.index(b, c);
 
                     for (int64_t k = 0; k < ch_in / groups; ++k) {
                         const float *const wbase =
@@ -474,6 +492,9 @@ struct Ops
                         }
                     }
                 }
+#ifdef USE_DISPATCH
+                );
+#endif
             }
         }
 

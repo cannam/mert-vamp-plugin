@@ -1,0 +1,10 @@
+
+OPTS 	:= -O3 -DUSE_CBLAS -DACCELERATE_NEW_LAPACK=1 -DUSE_DISPATCH -I/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/Frameworks/Accelerate.framework/Versions/Current/Frameworks/vecLib.framework/Headers
+
+OTHERLIBS	:= -framework Accelerate
+
+test:	main.cpp tensor.hpp model.hpp Makefile
+	g++ ${OPTS} main.cpp ../data/weights.a -o $@ -lsndfile ${OTHERLIBS}
+
+clean:
+	rm test

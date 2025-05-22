@@ -35,6 +35,7 @@ struct Module {
 };
 
 struct LayerBase : Module {
+    virtual ~LayerBase() { }
     virtual Tensor forward(const Tensor &x) = 0;
 };
 
@@ -112,7 +113,7 @@ struct HubertFeatureEncoder : LayerBase {
         }
     }
 
-    Tensor forward(const Tensor &x) {
+    Tensor forward(const Tensor &x) override {
         Tensor t = x;
         for (int i = 0; i < layers.size(); ++i) {
             t = layers[i]->forward(t);
@@ -137,7 +138,7 @@ struct MERTFeatureProjection : LayerBase {
         linearBias = loadData(key, "projection.bias");
     }
 
-    Tensor forward(const Tensor &x) {
+    Tensor forward(const Tensor &x) override {
         Tensor t = x;
         Ops::layerNorm(t, normWeight, normBias, false);
         t = Ops::linear(t, linearWeight, linearBias);
@@ -151,7 +152,7 @@ struct HubertSamePadLayer : LayerBase {
 
     void prepare(std::string) override { }
     
-    Tensor forward(const Tensor &t) {
+    Tensor forward(const Tensor &t) override {
         if (nConvPosEmbeddings % 2 != 0) {
             return t;
         }
@@ -195,7 +196,7 @@ struct HubertPositionalConvEmbedding : LayerBase {
         padding.prepare(key + ".padding");
     }
 
-    Tensor forward(const Tensor &in) {
+    Tensor forward(const Tensor &in) override {
         auto hidden_states = Ops::transpose12of3(in);
         hidden_states = Ops::conv1d
             (hidden_states, hiddenSize, hiddenSize,
@@ -249,7 +250,7 @@ struct HubertAttention : LayerBase {
         return Ops::transpose12of4(Ops::reshape(x, dim));
     }
     
-    Tensor forward(const Tensor &hidden_states) {
+    Tensor forward(const Tensor &hidden_states) override {
 
         auto bsz = hidden_states.sizes[0];
         auto tgt_len = hidden_states.sizes[1];
@@ -316,7 +317,7 @@ struct HubertFeedForward : LayerBase {
         outputBias = loadData(key, "output_dense.bias");
     }
 
-    Tensor forward(const Tensor &in) {
+    Tensor forward(const Tensor &in) override {
 
         auto hidden_states = Ops::linear
             (in, intermediateWeight, intermediateBias);
@@ -352,7 +353,7 @@ struct HubertEncoderLayer : LayerBase {
         feed_forward.prepare(key + ".feed_forward");
     }
 
-    Tensor forward(const Tensor &in) {
+    Tensor forward(const Tensor &in) override {
         
         Tensor attn_residual = in;
 
