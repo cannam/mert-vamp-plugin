@@ -59,7 +59,8 @@ MERTVampPlugin::getDescription() const
     desc += " This build uses the Accelerate framework.";
 #else 
     desc += " This build does not use LibTorch or other frameworks and may be quite slow.";
-#endif    
+#endif
+    return desc;
 }
 
 string
