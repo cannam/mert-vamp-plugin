@@ -18,7 +18,7 @@ $ ninja -C build
 ```
 
 The resulting binary will perform OK on a Mac (using Accelerate) but
-be appallingly slow anywhere else. To improve matters, build using
+be appallingly slow anywhere else. To speed it up, build using
 libtorch, or at least Intel MKL for matrix acceleration. To explain:
 
 This repo actually contains two different adaptations of the
