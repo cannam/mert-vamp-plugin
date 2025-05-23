@@ -21,13 +21,16 @@ The resulting binary will perform OK on a Mac (using Accelerate) but
 be appallingly slow anywhere else. To improve matters, build using
 libtorch, or at least Intel MKL for matrix acceleration. To explain:
 
-This repo actually has two different adaptations of the model. One is
-a close conversion of the PyTorch code using the libtorch C++ API; it
-can be found in the `cpp-libtorch` subdirectory. The other is a naive
-C++ implementation that can be compiled using MKL or Accelerate or
-without any external dependencies; this is in `cpp-selfcontained`. The
-libtorch build can be much faster if you have the framework properly
-configured, but that can be a bit troublesome.
+This repo actually contains two different adaptations of the
+model. One is a close conversion of the PyTorch code using the
+libtorch C++ API; it can be found in the `cpp-libtorch`
+subdirectory. The other is a naive C++ implementation that can be
+compiled using MKL or Accelerate or without any external dependencies;
+this is in `cpp-selfcontained`. The libtorch build can be much faster
+if you have the framework properly configured, but that can be a bit
+troublesome. The default, as above, will get you the self-contained
+version without any extra performance libraries (except on the Mac
+where they are system libraries).
 
 To configure with libtorch, you need to tell the build where to look
 for your libtorch install. If it is a system-wide one, this may be
@@ -48,7 +51,8 @@ $ meson setup build -Dmkl_path=/opt/intel/oneapi/mkl/latest
 $ ninja -C build
 ```
 
-All of these build configurations should produce identical results.
+All of these build configurations should produce identical results,
+just at different speeds.
 
 ## Credits and copyright
 
