@@ -104,7 +104,7 @@ else
     }
   else
     config_summary += {
-      'Threading': '(none)'
+      'Threading': 'None - this is bad, were we unable to find OpenMP support?'
     }
   endif # end openmp_dep
   
