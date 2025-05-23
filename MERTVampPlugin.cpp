@@ -50,7 +50,17 @@ MERTVampPlugin::getName() const
 string
 MERTVampPlugin::getDescription() const
 {
-    return "Generates features from music audio using the MERT-v1-95M transformer model.";
+    string desc = "Generates features from music audio using the MERT-v1-95M pretrained transformer model.";
+#if defined(USE_LIBTORCH)
+    desc += " This build uses LibTorch.";
+#elif defined(USE_MKL)
+    desc += " This build uses MKL.";
+#elif defined(USE_ACCELERATE)
+    desc += " This build uses the Accelerate framework.";
+#else 
+    desc += " This build does not use LibTorch or other frameworks and may be quite slow.";
+#endif
+    return desc;
 }
 
 string
@@ -212,9 +222,10 @@ MERTVampPlugin::getOutputDescriptors() const
 
     for (int i = 0; i < 12; ++i) {
         string is = to_string(i + 1);
-        if (i + 1 < 10) is = "0" + is;
-        d.identifier = "layer-" + is;
-        d.name = "Hidden layer " + is + " state";
+        string is0 = is;
+        if (i + 1 < 10) is0 = "0" + is0;
+        d.identifier = "layer-" + is0;
+        d.name = "Hidden layer " + is0 + " state";
         d.description = "Output from transformer layer " + is + ". Will only be returned if the \"rounds\" parameter of the plugin is set to at least " + is + ".";
         list.push_back(d);
     }
