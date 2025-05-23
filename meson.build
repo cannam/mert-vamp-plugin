@@ -18,6 +18,7 @@ conf.set('version', meson.project_version())
 configure_file(input: 'version.h.in', output: 'version.h', configuration: conf)
 
 system = host_machine.system()
+compiler = meson.get_compiler('cpp').get_id()
 architecture = host_machine.cpu_family()
 
 libtorch_path = get_option('libtorch_path')
@@ -25,7 +26,7 @@ mkl_path = get_option('mkl_path')
 
 config_summary = { 'System': system,
                    'Architecture': architecture,
-                   'C++ Compiler': meson.get_compiler('cpp').get_id(),
+                   'C++ Compiler': compiler,
                    'LibTorch Path': libtorch_path,
                    'MKL Path': mkl_path,
                  }
@@ -44,6 +45,12 @@ if system == 'darwin'
   ]
   general_link_args += [
     '-mmacosx-version-min=10.15',
+  ]
+elif system == 'windows'
+  general_defines += [
+    '-DNOMINMAX',
+    '-DUNICODE',
+    '-D_USE_MATH_DEFINES',
   ]
 endif
 
@@ -84,12 +91,14 @@ elif system == 'darwin'
   }
 else
   if openmp_dep.found()
-    feature_defines += [
-      '-fopenmp',
-    ]
-    feature_libs += [
-      '-fopenmp',
-    ]
+    if compiler == 'gcc'
+      feature_defines += [
+        '-fopenmp',
+      ]
+      feature_libs += [
+        '-fopenmp',
+      ]
+    endif
     config_summary += {
       'Threading': 'OpenMP',
     }
@@ -106,12 +115,25 @@ else
       '-I' + mkl_path / 'include',
       '-I' + mkl_path / 'include/mkl'
     ]
-    feature_libs += [
-      '-L' + (mkl_path / 'lib'),
-      '-Wl,-Bstatic',
-      '-lmkl_intel_lp64', '-lmkl_gnu_thread', '-lmkl_core',
-      '-Wl,-Bdynamic',
-    ]
+    if compiler == 'gcc'
+      feature_libs += [
+        '-L' + (mkl_path / 'lib'),
+        '-Wl,-Bstatic',
+        '-lmkl_intel_lp64', '-lmkl_gnu_thread', '-lmkl_core',
+        '-Wl,-Bdynamic',
+      ]
+#    elif compiler == 'msvc'
+#      feature_libs += [
+#        '-L' + (mkl_path / 'lib'),
+#        '-L' + (mkl_path / '../../compiler/latest/lib'),
+#        '-lmkl_intel_lp64', '-lmkl_intel_thread', '-lmkl_core', '-llibiomp5md',
+#      ]
+    else
+      feature_libs += [
+        '-L' + (mkl_path / 'lib'),
+        '-lmkl_intel_lp64', '-lmkl_sequential', '-lmkl_core',
+      ]
+    endif
     config_summary += {
       'Matrix Library': 'MKL',
     }
@@ -185,6 +207,10 @@ install_data(
 weight_archive = static_library(
   'weights',
   weight_files,
+  override_options: [
+    'buildtype=debug',
+    'warning_level=0',
+  ],
   cpp_args: [
     general_defines,
   ],
