@@ -279,7 +279,12 @@ void
 MERTVampPlugin::reset()
 {
     delete m_resampler;
-    m_resampler = new Resampler(m_inputSampleRate, processingSampleRate);
+    m_resampler = nullptr;
+    
+    if (m_inputSampleRate != processingSampleRate) {
+        m_resampler = new Resampler(m_inputSampleRate, processingSampleRate);
+    }
+    
     m_chunk = {};
 }
 
@@ -295,13 +300,16 @@ MERTVampPlugin::process(const float *const *inputBuffers, Vamp::RealTime)
         }
     }
 
-    auto rout = m_resampler->process(rin.data(), m_blockSize);
-
-    m_chunk.insert(m_chunk.end(), rout.begin(), rout.end());
+    if (m_resampler) {
+        auto rout = m_resampler->process(rin.data(), m_blockSize);
+        m_chunk.insert(m_chunk.end(), rout.begin(), rout.end());
+    } else {
+        m_chunk.insert(m_chunk.end(), rin.begin(), rin.end());
+    }        
 
     int64_t chunkLength = round(m_chunkDuration * processingSampleRate);
     
-    while (int64_t(m_chunk.size()) > chunkLength) {
+    while (int64_t(m_chunk.size()) >= chunkLength) {
         processChunk(fs, chunkLength);
     }
     
@@ -340,7 +348,6 @@ MERTVampPlugin::processChunk(FeatureSet &fs, int64_t length)
     }
 #else
     Tensor input({ 1, 1, int64_t(chunk.size()) }, chunk);
-    cerr << "sending input of size " << chunk.size() << endl;
     vector<Tensor> output = m_mert.forward(input, m_transformerRounds);
     for (int64_t i = 0; i < int64_t(output.size()); ++i) {
         Tensor &t = output[i];
@@ -366,7 +373,7 @@ MERTVampPlugin::getRemainingFeatures()
     
     int64_t chunkLength = round(m_chunkDuration * processingSampleRate);
     
-    while (int64_t(m_chunk.size()) > chunkLength) {
+    while (int64_t(m_chunk.size()) >= chunkLength) {
         processChunk(fs, chunkLength);
     }
     if (m_chunk.size() > 0) {
