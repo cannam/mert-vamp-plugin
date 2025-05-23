@@ -59,9 +59,15 @@ if libtorch_path != ''
     '-Wl,--rpath', libtorch_path / 'lib',
     '-ltorch', '-ltorch_cpu', '-lc10',
   ]
+  if system == 'linux'
+    feature_defines += [
+      # otherwise "error "<glog/logging.h> was not included correctly" on Arch
+      '-DGLOG_USE_GLOG_EXPORT'
+    ]
+  endif
   config_summary += {
-    'Computation': 'Torch',
-    'Threading': 'Torch',
+    'Matrix Library': 'LibTorch',
+    'Threading': 'LibTorch',
   }
 elif system == 'darwin'
   feature_defines += [
@@ -73,7 +79,7 @@ elif system == 'darwin'
     '-framework', 'Accelerate',
   ]
   config_summary += {
-    'Computation': 'Accelerate',
+    'Matrix Library': 'Accelerate',
     'Threading': 'Dispatch',
   }
 else
@@ -107,11 +113,11 @@ else
       '-Wl,-Bdynamic',
     ]
     config_summary += {
-      'Computation': 'MKL',
+      'Matrix Library': 'MKL',
     }
   else
     config_summary += {
-      'Matrix Library': '(none)'
+      'Matrix Library': 'None - see meson_options.txt for LibTorch or MKL options'
     }
   endif # end not mkl_path
   
