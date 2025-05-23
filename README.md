@@ -8,7 +8,10 @@ published pre-trained
 [MERT-v1-95M](https://huggingface.co/m-a-p/MERT-v1-95M).
 
 The plugin was written by Chris Cannam in the Centre for Digital
-Music, Queen Mary University of London.
+Music, Queen Mary University of London, based on the MERT Python code
+by Li et al. See the [MERT
+documentation](https://huggingface.co/m-a-p/MERT-v1-95M) for details
+of the model and accompanying citations.
 
 Copyright (c) 2025 Queen Mary, University of London.
 
