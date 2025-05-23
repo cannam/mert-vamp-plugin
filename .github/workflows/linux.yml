@@ -1,0 +1,31 @@
+name: Linux CI
+
+on: [push, pull_request]
+
+jobs:
+  build:
+
+    runs-on: ubuntu-24.10
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: install-packages
+      run: |
+        sudo apt-get update
+        sudo apt-get install software-properties-common build-essential libtorch-dev intel-mkl libsndfile-dev git mercurial smlnj meson ninja-build time
+    - name: repoint
+      run: ./repoint install
+    - name: configure
+      run: |
+        meson setup build_mkl -Dmkl_path=/usr -Dbuildtype=release
+    - name: make
+      run: |
+        ninja -C build
+    - name: test
+      run: |
+        cd ext/vamp-plugin-sdk
+        ./configure && make -j3
+        cd ../..
+        VAMP_PATH=$(pwd)/build ext/vamp-plugin-sdk/host/vamp-simple-host -l
+        VAMP_PATH=$(pwd)/build ext/vamp-plugin-sdk/host/vamp-simple-host mert-vamp-plugin:mert-vamp-plugin:layer-12 data/testfile.wav > tmp.csv
+        wc tmp.csv
