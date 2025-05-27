@@ -262,6 +262,15 @@ MERTVampPlugin::reset()
     }
 
     m_chunkLength = round(m_chunkDuration * processingSampleRate);
+
+    // The chunk length needs to be a multiple of
+    // processingSampleRate/outputSampleRate, so as to lead to an
+    // exact number of output features
+
+    int64_t unit = processingSampleRate / outputSampleRate;
+
+    m_chunkLength = (m_chunkLength / unit) * unit;
+    if (m_chunkLength < unit) m_chunkLength = unit;
     
     m_chunk = {};
 }
