@@ -5,8 +5,7 @@
 */
 
 #include "MERTVampPlugin.h"
-
-#include "ext/qm-dsp/dsp/rateconversion/Resampler.h"
+#include "Resampler.h"
 
 #include "../data/weights.hpp"
 

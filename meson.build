@@ -147,15 +147,10 @@ endif # end not darwin
   
 plugin_files = [
   'MERTVampPlugin.cpp',
+  'Resampler.cpp',
+  'ResamplerP.cpp',
   'plugins.cpp',
   'data/weights.cpp',
-]
-
-qmdsp_files = [
-  'ext/qm-dsp/dsp/rateconversion/Resampler.cpp',
-  'ext/qm-dsp/maths/MathUtilities.cpp',
-  'ext/qm-dsp/base/KaiserWindow.cpp',
-  'ext/qm-dsp/base/SincWindow.cpp',
 ]
 
 weight_files = [
@@ -219,7 +214,6 @@ weight_archive = static_library(
 plugin_library = shared_library(
   'mert-vamp-plugin',
   plugin_files,
-  qmdsp_files,
   vamp_sdk_files,
   cpp_args: [
     feature_defines,
@@ -230,7 +224,6 @@ plugin_library = shared_library(
   ],
   include_directories: [
     'ext/vamp-plugin-sdk',
-    'ext/qm-dsp',
   ],
   link_with: [
     weight_archive,
