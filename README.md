@@ -1,7 +1,7 @@
 
 # MERT Vamp Plugin
 
-This is an *experimental* [Vamp plugin](https://vamp-plugins.org)
+This is an **experimental** [Vamp plugin](https://vamp-plugins.org)
 implementation of [MERT audio
 features](https://github.com/yizhilll/MERT) corresponding to the
 published pre-trained
