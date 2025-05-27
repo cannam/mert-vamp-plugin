@@ -64,9 +64,11 @@ protected:
     float m_chunkDuration;
     bool m_adaptiveChunkStitching;
 
+    int64_t m_chunkLength;
+    
     std::vector<float> m_chunk;
 
-    void processChunk(FeatureSet &fs, int64_t length);
+    void processChunk(FeatureSet &fs);
 };
 
 

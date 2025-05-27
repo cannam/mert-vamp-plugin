@@ -17,14 +17,14 @@
 using namespace std;
 
 static float defaultChunkDuration = 8.f;
-static bool defaultAdaptiveChunkStitching = true;
+static int outputSampleRate = 50;
 
 MERTVampPlugin::MERTVampPlugin(float inputSampleRate) :
     Plugin(inputSampleRate),
     m_blockSize(0),
     m_resampler(nullptr),
     m_chunkDuration(defaultChunkDuration),
-    m_adaptiveChunkStitching(defaultAdaptiveChunkStitching)
+    m_chunkLength(0)
 {
 }
 
@@ -117,7 +117,7 @@ MERTVampPlugin::getParameterDescriptors() const
     ParameterDescriptor d;
     d.identifier = "chunk";
     d.name = "Chunk duration";
-    d.description = "Duration of the chunks into which the audio will be split before encoding. Does not include any overlap required by the stitching method. Longer chunks demand more memory to process.";
+    d.description = "Duration of the chunks into which the audio will be split before encoding. Longer chunks demand more memory to process.";
     d.unit = "s";
     d.minValue = 1;
     d.maxValue = 60;
@@ -125,18 +125,6 @@ MERTVampPlugin::getParameterDescriptors() const
     d.isQuantized = false;
     list.push_back(d);
 
-    d.identifier = "stitch";
-    d.name = "Chunk stitching";
-    d.description = "Method used to stitch chunks after processing. Adaptive means to add an overlap between chunks and choose a stitch position at a minimum difference between them. Naive means to make each chunk exactly the chunk duration.";
-    d.unit = "";
-    d.minValue = 0;
-    d.maxValue = 1;
-    d.defaultValue = (defaultAdaptiveChunkStitching ? 1 : 0);
-    d.isQuantized = true;
-    d.quantizeStep = 1;
-    d.valueNames = { "Naive", "Adaptive" };
-    list.push_back(d);
-    
     return list;
 }
 
@@ -145,8 +133,6 @@ MERTVampPlugin::getParameter(string name) const
 {
     if (name == "chunk") {
         return m_chunkDuration;
-    } else if (name == "stitch") {
-        return m_adaptiveChunkStitching ? 1.f : 0.f;
     }
     return 0;
 }
@@ -156,8 +142,6 @@ MERTVampPlugin::setParameter(string name, float value)
 {
     if (name == "chunk") {
         m_chunkDuration = value;
-    } else if (name == "stitch") {
-        m_adaptiveChunkStitching = (value > 0.5f);
     }
 }
 
@@ -194,7 +178,7 @@ MERTVampPlugin::getOutputDescriptors() const
     d.hasKnownExtents = false; // for the conv output only
     d.isQuantized = false;
     d.sampleType = OutputDescriptor::FixedSampleRate;
-    d.sampleRate = 50.f;
+    d.sampleRate = outputSampleRate;
     d.hasDuration = false;
     list.push_back(d);
 
@@ -277,6 +261,8 @@ MERTVampPlugin::reset()
     if (m_inputSampleRate != processingSampleRate) {
         m_resampler = new Resampler(m_inputSampleRate, processingSampleRate);
     }
+
+    m_chunkLength = round(m_chunkDuration * processingSampleRate);
     
     m_chunk = {};
 }
@@ -285,6 +271,11 @@ MERTVampPlugin::FeatureSet
 MERTVampPlugin::process(const float *const *inputBuffers, Vamp::RealTime)
 {
     FeatureSet fs;
+    
+    if (!m_chunkLength) {
+        cerr << "ERROR: MERTVampPlugin::process: Not initialised" << endl;
+        return fs;
+    }
 
     vector<double> rin(m_blockSize, 0.0);
     for (int c = 0; c < m_channels; ++c) {
@@ -300,27 +291,34 @@ MERTVampPlugin::process(const float *const *inputBuffers, Vamp::RealTime)
         m_chunk.insert(m_chunk.end(), rin.begin(), rin.end());
     }        
 
-    int64_t chunkLength = round(m_chunkDuration * processingSampleRate);
-    
-    while (int64_t(m_chunk.size()) >= chunkLength) {
-        processChunk(fs, chunkLength);
+    while (int64_t(m_chunk.size()) >= m_chunkLength) {
+        processChunk(fs);
     }
     
     return fs;
 }
 
 void
-MERTVampPlugin::processChunk(FeatureSet &fs, int64_t length)
+MERTVampPlugin::processChunk(FeatureSet &fs)
 {
-    if (length > int64_t(m_chunk.size())) {
-        length = m_chunk.size();
-    }
-    vector<float> chunk(m_chunk.begin(), m_chunk.begin() + length);
-    m_chunk = vector<float>(m_chunk.begin() + length, m_chunk.end());
+    // If there is anything in the chunk, we should process it even if
+    // it isn't complete - the caller makes that decision, not us. But
+    // it could be longer than we need.
 
+    int64_t length = m_chunkLength;
+    vector<float> toProcess;
+    
+    if (int64_t(m_chunk.size()) < length) {
+        toProcess = m_chunk;
+        m_chunk = {};
+    } else {
+        toProcess = vector<float>(m_chunk.begin(), m_chunk.begin() + length);
+        m_chunk = vector<float>(m_chunk.begin() + length, m_chunk.end());
+    }
+    
 #ifdef USE_LIBTORCH
     at::Tensor input = torch::from_blob
-        (chunk.data(), { 1, 1, int64_t(chunk.size()) }); // no need to clone
+        (chunk.data(), { 1, 1, int64_t(toProcess.size()) }); // no need to clone
     vector<at::Tensor> output = m_mert(input);
     for (int64_t i = 0; i < int64_t(output.size()); ++i) {
         at::Tensor t = output[i].to(at::kCPU).contiguous();
@@ -329,6 +327,7 @@ MERTVampPlugin::processChunk(FeatureSet &fs, int64_t length)
         auto st = t.strides();
         for (int64_t j = 0; j < sz[0]; ++j) {
             for (int64_t k = 0; k < sz[1]; ++k) {
+                
                 Feature f;
                 f.hasTimestamp = false;
                 int64_t ix0 = j * st[0] + k * st[1];
@@ -339,7 +338,7 @@ MERTVampPlugin::processChunk(FeatureSet &fs, int64_t length)
         }
     }
 #else
-    Tensor input({ 1, 1, int64_t(chunk.size()) }, chunk);
+    Tensor input({ 1, 1, int64_t(toProcess.size()) }, toProcess);
     vector<Tensor> output = m_mert.forward(input);
     for (int64_t i = 0; i < int64_t(output.size()); ++i) {
         Tensor &t = output[i];
@@ -363,13 +362,11 @@ MERTVampPlugin::getRemainingFeatures()
 {
     FeatureSet fs;
     
-    int64_t chunkLength = round(m_chunkDuration * processingSampleRate);
-    
-    while (int64_t(m_chunk.size()) >= chunkLength) {
-        processChunk(fs, chunkLength);
+    while (int64_t(m_chunk.size()) >= m_chunkLength) {
+        processChunk(fs);
     }
     if (m_chunk.size() > 0) {
-        processChunk(fs, m_chunk.size());
+        processChunk(fs);
     }
     
     return fs;

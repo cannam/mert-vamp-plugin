@@ -57,8 +57,8 @@ this is normally automatic.
 
 All of these build configurations should produce identical results,
 just at different speeds. Here's a comparative table of runtimes to
-process a 20s test file using 8s non-adaptive chunks on an Intel
-i5-1340P running Arch Linux:
+process a 20s test file using 8s chunks on an Intel i5-1340P running
+Arch Linux:
 
 <table>
 <tr><td><b>Configuration</b></td><td><b>Run time</b></td><td><b>Where is the extra time spent?</b></td></tr>
