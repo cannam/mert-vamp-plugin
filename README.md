@@ -9,8 +9,6 @@ published pre-trained
 
 ## Compiling the plugin
 
-### General idea
-
 ```
 $ ./repoint install
 $ meson setup build
@@ -67,6 +65,17 @@ Arch Linux:
 <tr><td>Without libtorch or Intel MKL, with OpenMP</td><td>13.2 sec</td><td>Matrix multiplication</td></tr>
 <tr><td>Without libtorch, Intel MKL, or OpenMP</td><td>66.8 sec</td><td>Serial execution of both</td></tr>
 </table>
+
+## Parameters and Outputs
+
+The plugin has only one adjustable parameter, "Chunk Duration"
+(`chunk`). This controls the length in seconds of the chunks into
+which the input audio will be split in order to feed them to the
+model. Longer chunks may lead to the audio being processed more
+quickly overall, but too long risks running out of memory, or timing
+out on individual process calls, if the host uses a timeout.
+
+
 
 ## Credits and copyright
 

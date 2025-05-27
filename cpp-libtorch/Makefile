@@ -7,10 +7,15 @@ LIBTORCH_CSRC_INCDIR := ${LIBTORCH_CSRC_DIR}/api/include
 LIBTORCH_LIBDIR := ${LIBTORCH_INSTALL}/lib
 LIBTORCH_DEP_LIBDIR := ${LIBTORCH_INSTALL}/lib64
 
+WEIGHTS	:= $(subst .cpp,.o,$(wildcard ../data/weights*.cpp))
+
 OPTS	:= -O3
 
-test:	main.cpp model.hpp Makefile
-	g++ ${OPTS} main.cpp ../data/weights.a -o $@ -I${LIBTORCH_CSRC_INCDIR} -I${LIBTORCH_INCDIR} -I${LIBTORCH_CSRC_DIR} -L${LIBTORCH_LIBDIR} -L${LIBTORCH_DEP_LIBDIR} -Wl,--rpath ${LIBTORCH_LIBDIR} -ltorch -ltorch_cpu -lc10 -lsndfile ${OTHERLIBS}
+test:	main.cpp model.hpp weights.a Makefile
+	g++ ${OPTS} main.cpp weights.a -o $@ -I${LIBTORCH_CSRC_INCDIR} -I${LIBTORCH_INCDIR} -I${LIBTORCH_CSRC_DIR} -L${LIBTORCH_LIBDIR} -L${LIBTORCH_DEP_LIBDIR} -Wl,--rpath ${LIBTORCH_LIBDIR} -ltorch -ltorch_cpu -lc10 -lsndfile ${OTHERLIBS}
+
+weights.a: ${WEIGHTS}
+	ar rc $@ $^
 
 clean:
 	rm test

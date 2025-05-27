@@ -5,8 +5,13 @@ OPTS            := -O3
 
 OTHERLIBS	:= 
 
-test:	main.cpp tensor.hpp model.hpp Makefile.generic
-	g++ ${OPTS} main.cpp ../data/weights.a -o $@ -lsndfile ${OTHERLIBS}
+WEIGHTS	:= $(subst .cpp,.o,$(wildcard ../data/weights*.cpp))
+
+test:	main.cpp tensor.hpp model.hpp weights.a Makefile.generic
+	g++ ${OPTS} main.cpp weights.a -o $@ -lsndfile ${OTHERLIBS}
+
+weights.a: ${WEIGHTS}
+	ar rc $@ $^
 
 clean:
 	rm test

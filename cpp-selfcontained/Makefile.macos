@@ -3,8 +3,13 @@ OPTS 	:= -O3 -DUSE_CBLAS -DUSE_ACCELERATE -DUSE_DISPATCH -DACCELERATE_NEW_LAPACK
 
 OTHERLIBS	:= -framework Accelerate
 
-test:	main.cpp tensor.hpp model.hpp Makefile.macos
-	g++ ${OPTS} main.cpp ../data/weights.a -o $@ -lsndfile ${OTHERLIBS}
+WEIGHTS	:= $(subst .cpp,.o,$(wildcard ../data/weights*.cpp))
+
+test:	main.cpp tensor.hpp model.hpp weights.a Makefile.macos
+	g++ ${OPTS} main.cpp weights.a -o $@ -lsndfile ${OTHERLIBS}
+
+weights.a: ${WEIGHTS}
+	ar rc $@ $^
 
 clean:
 	rm test
