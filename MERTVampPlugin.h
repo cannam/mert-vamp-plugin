@@ -63,7 +63,6 @@ protected:
     
     float m_chunkDuration;
     bool m_adaptiveChunkStitching;
-    int m_transformerRounds;
 
     std::vector<float> m_chunk;
 

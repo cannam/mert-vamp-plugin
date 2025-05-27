@@ -18,15 +18,13 @@ using namespace std;
 
 static float defaultChunkDuration = 8.f;
 static bool defaultAdaptiveChunkStitching = true;
-static int defaultTransformerRounds = nHiddenLayers;
 
 MERTVampPlugin::MERTVampPlugin(float inputSampleRate) :
     Plugin(inputSampleRate),
     m_blockSize(0),
     m_resampler(nullptr),
     m_chunkDuration(defaultChunkDuration),
-    m_adaptiveChunkStitching(defaultAdaptiveChunkStitching),
-    m_transformerRounds(defaultTransformerRounds)
+    m_adaptiveChunkStitching(defaultAdaptiveChunkStitching)
 {
 }
 
@@ -138,18 +136,6 @@ MERTVampPlugin::getParameterDescriptors() const
     d.quantizeStep = 1;
     d.valueNames = { "Naive", "Adaptive" };
     list.push_back(d);
-
-    d.identifier = "rounds";
-    d.name = "Transformer rounds";
-    d.description = "Number of rounds of the transformer architecture to run. This defines how many of the plugin's feature outputs contain valid data. Higher-numbered rounds typically correspond to higher-level musical features. If you reduce this from the default to some N, the plugin will run more quickly but only the first N hidden-layer outputs will contain any values. The default has all outputs populated.";
-    d.unit = "rounds";
-    d.minValue = 0;
-    d.maxValue = nHiddenLayers;
-    d.defaultValue = defaultTransformerRounds;
-    d.isQuantized = true;
-    d.quantizeStep = 1;
-    d.valueNames = {};
-    list.push_back(d);
     
     return list;
 }
@@ -161,8 +147,6 @@ MERTVampPlugin::getParameter(string name) const
         return m_chunkDuration;
     } else if (name == "stitch") {
         return m_adaptiveChunkStitching ? 1.f : 0.f;
-    } else if (name == "rounds") {
-        return m_transformerRounds;
     }
     return 0;
 }
@@ -174,8 +158,6 @@ MERTVampPlugin::setParameter(string name, float value)
         m_chunkDuration = value;
     } else if (name == "stitch") {
         m_adaptiveChunkStitching = (value > 0.5f);
-    } else if (name == "rounds") {
-        m_transformerRounds = round(value);
     }
 }
 
@@ -226,7 +208,7 @@ MERTVampPlugin::getOutputDescriptors() const
         if (i + 1 < 10) is0 = "0" + is0;
         d.identifier = "layer-" + is0;
         d.name = "Hidden layer " + is0 + " state";
-        d.description = "Output from transformer layer " + is + ". Will only be returned if the \"rounds\" parameter of the plugin is set to at least " + is + ".";
+        d.description = "Output from transformer layer " + is + ".";
         list.push_back(d);
     }
     
@@ -337,7 +319,6 @@ MERTVampPlugin::processChunk(FeatureSet &fs, int64_t length)
     m_chunk = vector<float>(m_chunk.begin() + length, m_chunk.end());
 
 #ifdef USE_LIBTORCH
-    //!!! + support rounds parameter
     at::Tensor input = torch::from_blob
         (chunk.data(), { 1, 1, int64_t(chunk.size()) }); // no need to clone
     vector<at::Tensor> output = m_mert(input);
@@ -359,7 +340,7 @@ MERTVampPlugin::processChunk(FeatureSet &fs, int64_t length)
     }
 #else
     Tensor input({ 1, 1, int64_t(chunk.size()) }, chunk);
-    vector<Tensor> output = m_mert.forward(input, m_transformerRounds);
+    vector<Tensor> output = m_mert.forward(input);
     for (int64_t i = 0; i < int64_t(output.size()); ++i) {
         Tensor &t = output[i];
         const float *data = t.constData();
