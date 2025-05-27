@@ -75,7 +75,20 @@ model. Longer chunks may lead to the audio being processed more
 quickly overall, but too long risks running out of memory, or timing
 out on individual process calls, if the host uses a timeout.
 
+Chunking is handled in a completely naive way: the selected duration
+is rounded to ensure an exact feature count, the input audio is split
+into chunks at precisely the length needed for the rounded duration,
+and the features are stuck together again without modification or
+interpolation afterwards. Discontinuities can therefore occur at chunk
+boundaries - an obvious area for improvement.
 
+The plugin has 13 outputs. All have the same form, a fixed-sample-rate
+(50 features/sec) series of 768-bin features. The first output
+("Convolutional embedding") is the output of the preprocessor as
+supplied to the first attention layer in the model. The remaining
+outputs ("Hidden layer N state" for N in 1-12) are the features
+extracted from the subsequent 12 rounds of attention layers, with
+layer 12 being the final output from the model.
 
 ## Credits and copyright
 
