@@ -61,7 +61,7 @@ i5-1340P running Linux:
 <tr><td>With libtorch</td><td>2.6 sec</td><td>n/a</td></tr>
 <tr><td>Without libtorch, with Intel MKL and OpenMP</td><td>5.3 sec</td><td>Convolution</td></tr>
 <tr><td>Without libtorch or Intel MKL, with OpenMP</td><td>13.2 sec</td><td>Matrix multiplication</td></tr>
-<tr><td>Without libtorch, Intel MKL, or OpenMP</td><td>66.8 sec</td><td>Serial implementations of both</td></tr>
+<tr><td>Without libtorch, Intel MKL, or OpenMP</td><td>66.8 sec</td><td>Serial execution of both</td></tr>
 </table>
 
 ## Credits and copyright
