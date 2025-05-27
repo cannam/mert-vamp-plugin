@@ -1,0 +1,17 @@
+pytorch_model.bin
+*.wav
+__pycache__
+*~
+*.rej
+*.o
+*.a
+build*
+*.csv
+*.svg
+*.orig
+experiment
+test
+*.pth
+ext/
+.repoint*
+vgcore.*
