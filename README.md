@@ -33,8 +33,8 @@ version without any extra performance libraries (except on the Mac
 where they are system libraries).
 
 To configure with libtorch, you need to tell the build where to look
-for your libtorch install. If it is a system-wide one, this may be
-enough:
+for your libtorch install. If it is a system-wide installation,
+something like this may be enough:
 
 ```
 $ ./repoint install
