@@ -75,7 +75,7 @@ MERTVampPlugin::getPluginVersion() const
 string
 MERTVampPlugin::getCopyright() const
 {
-    return "Code GPL; trained weights CC-BY-NC 4.0";
+    return "Code MIT/X11; trained weights CC-BY-NC 4.0";
 }
 
 MERTVampPlugin::InputDomain
