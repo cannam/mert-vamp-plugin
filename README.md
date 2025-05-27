@@ -57,10 +57,11 @@ process a 20s test file using 8s non-adaptive chunks on an Intel
 i5-1340P running Linux:
 
 <table>
-<tr><td>With libtorch</td><td>2.6 sec</td></tr>
-<tr><td>Without libtorch, with Intel MKL and OpenMP</td><td>5.3 sec</td></tr>
-<tr><td>Without libtorch or Intel MKL, with OpenMP</td><td>13.2 sec</td></tr>
-<tr><td>Without libtorch, Intel MKL, or OpenMP</td><td>66.8 sec</td></tr>
+<tr><th>Configuration</th><th>Time</th><th>Where is the extra time spent?</th></tr>
+<tr><td>With libtorch</td><td>2.6 sec</td><td>n/a</td></tr>
+<tr><td>Without libtorch, with Intel MKL and OpenMP</td><td>5.3 sec</td><td>Convolution</td></tr>
+<tr><td>Without libtorch or Intel MKL, with OpenMP</td><td>13.2 sec</td><td>Matrix multiplication</td></tr>
+<tr><td>Without libtorch, Intel MKL, or OpenMP</td><td>66.8 sec</td><td>Serial implementations of both</td></tr>
 </table>
 
 ## Credits and copyright
