@@ -29,8 +29,8 @@ implementation developed by comparing outputs against the original
 PyTorch pre-trained model, that has not yet been put to use for any
 serious purpose and is known to have some limitations. The code itself
 is intended to be comprehensible and reusable and potentially handy
-for other models. More details, including notes on performance,
-follow.
+for other models. Pre-compiled plugin binaries are available from the
+Github Releases tab.
 
 ## Compiling the plugin
 
