@@ -29,10 +29,12 @@ implementation developed by comparing outputs against the original
 PyTorch pre-trained model, that has not yet been put to use for any
 serious purpose and is known to have some limitations. The code itself
 is intended to be comprehensible and reusable and potentially handy
-for other models. Pre-compiled plugin binaries are available from the
-Github Releases tab.
+for other models.
 
 ## Compiling the plugin
+
+Pre-compiled plugin binaries are available from the Github Releases
+tab. To build your own:
 
 ```
 $ ./repoint install
