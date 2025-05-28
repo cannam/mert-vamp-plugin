@@ -12,11 +12,25 @@ published pre-trained
 MERT is a machine-learning model that converts music audio into
 sequences of feature vectors that can serve as input for various
 "music understanding" tasks. The features are not expected to be
-directly meaningful on their own, but to extract patterns that can
-then be used in training further (typically smaller) models for
-specific activities. See [MERT: Acoustic Music Understanding Model
-with Large-Scale Self-supervised
+directly interpretable on their own, but to capture patterns that can
+be used in training further models for specific activities. See [MERT:
+Acoustic Music Understanding Model with Large-Scale Self-supervised
 Training](https://arxiv.org/abs/2306.00107) for more details.
+
+This code implements the smallest current pre-trained MERT model at
+the time of writing, as a Vamp plugin. That is, a native-code binary
+that can be run in batch tools such as [Sonic
+Annotator](https://vamp-plugins.org/sonic-annotator/) or graphical
+ones such as [Sonic Visualiser](https://www.sonicvisualiser.org/), or
+potentially adapted into other applications.
+
+This code is **experimental** in the sense that it is a draft
+implementation developed by comparing outputs against the original
+PyTorch pre-trained model, that has not yet been put to use for any
+serious purpose and is known to have some limitations. The code itself
+is intended to be comprehensible and reusable and potentially handy
+for other models. More details, including notes on performance,
+follow.
 
 ## Compiling the plugin
 
