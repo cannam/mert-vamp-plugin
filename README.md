@@ -7,6 +7,17 @@ features](https://github.com/yizhilll/MERT) corresponding to the
 published pre-trained
 [MERT-v1-95M](https://huggingface.co/m-a-p/MERT-v1-95M).
 
+## What is it?
+
+MERT is a machine-learning model that converts music audio into
+sequences of feature vectors that can serve as input for various
+"music understanding" tasks. The features are not expected to be
+directly meaningful on their own, but to extract patterns that can
+then be used in training further (typically smaller) models for
+specific activities. See [MERT: Acoustic Music Understanding Model
+with Large-Scale Self-supervised
+Training](https://arxiv.org/abs/2306.00107) for more details.
+
 ## Compiling the plugin
 
 ```
@@ -97,7 +108,7 @@ Music, Queen Mary University of London, based on the MERT Python code
 by Li et al. Any mistakes in the adaptation are totally my own
 fault. See the [MERT
 documentation](https://huggingface.co/m-a-p/MERT-v1-95M) for details
-of the model and accompanying citations.
+of the model, full credits, and accompanying citations.
 
 Copyright (c) 2025 Queen Mary, University of London.
 
