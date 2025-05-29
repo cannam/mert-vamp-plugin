@@ -133,6 +133,23 @@ timestamped so that a display in Sonic Visualiser or similar will show
 them as a grid with the x-coordinate being output number; the
 timestamps for this output otherwise have no meaning.
 
+## Checking the working
+
+1. In `./python/` run `test.py` - if the dependencies are all present
+this should process a test file using the PyTorch MERT model and
+produce output `out-12-pytorch.csv`
+
+2. In `./cpp-libtorch/` run `make` then `./test` - if the dependencies
+are present this should process the same test file using the libtorch
+conversion and produce output `out-12-cpp-libtorch.csv`
+
+3. In `./cpp-selfcontained/` run `make -f Makefile.generic` then
+`./test` - this should process the same test file using the plain
+conversion and produce output `out-12-cpp-selfcontained.csv`
+
+4. The three CSV files should contain the same data up to some limit
+of floating-point precision.
+
 ## Credits and copyright
 
 The plugin was written by Chris Cannam in the Centre for Digital

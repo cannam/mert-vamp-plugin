@@ -105,7 +105,6 @@ int main(int argc, char **argv)
 
     cerr << "received " << output.size() << " tensors as output" << endl;
 
-    dump(output[0], "experiment-out-0");
-    dump(output[12], "experiment-out-12");
+    dump(output[12], "out-12-cpp-libtorch");
 }
 
