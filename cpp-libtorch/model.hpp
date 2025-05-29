@@ -90,13 +90,13 @@ struct HubertFeatureEncoderImpl : LayerBase {
     HubertFeatureEncoderImpl() {
         layers = register_module("conv_layers", torch::nn::ModuleList());
         layers->push_back(register_module("0", HubertGroupNormConvLayer(0)));
-        for (int i = 1; i < convDimensions.size(); ++i) {
+        for (int i = 1; i < int(convDimensions.size()); ++i) {
             layers->push_back(register_module(std::to_string(i), HubertNoLayerNormConvLayer(i)));
         }
     }
 
     at::Tensor forwardImpl(at::Tensor x) {
-        for (int i = 0; i < layers->size(); ++i) {
+        for (int i = 0; i < int(layers->size()); ++i) {
             if (auto layer = layers[i]->as<LayerBase>()) {
                 x = layer->forward(x);
             } else {
@@ -382,7 +382,7 @@ struct HubertEncoderImpl : torch::nn::Module {
         std::vector<at::Tensor> all_hidden_states;
         all_hidden_states.push_back(hidden_states);
 
-        for (int i = 0; i < layers->size(); ++i) {
+        for (int i = 0; i < int(layers->size()); ++i) {
             if (auto layer = layers[i]->as<HubertEncoderLayer>()) {
                 hidden_states = layer->forward(hidden_states);
                 //!!! probably have to copy this explicitly
