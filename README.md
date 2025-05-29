@@ -76,6 +76,12 @@ $ meson setup build -Dmkl_path=/opt/intel/oneapi/mkl/latest
 $ ninja -C build
 ```
 
+The build can also detect and use other BLAS/CBLAS implementations
+besides MKL or Accelerate, but by default it won't do so unless you
+specify `-Duse_cblas`, because performance depends so much on the
+specific BLAS implementation and is often slower than the default
+code.
+
 The build can also configure itself with or without thread support
 using OpenMP or Apple's Dispatch library, depending on availability;
 this is normally automatic.
