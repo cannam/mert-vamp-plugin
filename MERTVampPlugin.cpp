@@ -15,7 +15,7 @@
 
 using namespace std;
 
-static float defaultChunkDuration = 8.f;
+static float defaultChunkDuration = 5.f;
 static int outputSampleRate = 50;
 
 MERTVampPlugin::MERTVampPlugin(float inputSampleRate) :
