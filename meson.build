@@ -23,6 +23,7 @@ architecture = host_machine.cpu_family()
 
 libtorch_path = get_option('libtorch_path')
 mkl_path = get_option('mkl_path')
+use_cblas = get_option('use_cblas')
 
 config_summary = { 'System': system,
                    'Architecture': architecture,
@@ -32,6 +33,7 @@ config_summary = { 'System': system,
                  }
 
 openmp_dep = dependency('openmp', required: false)
+cblas_dep = dependency('cblas', required: false)
 
 feature_defines = []
 feature_libs = []
@@ -137,6 +139,19 @@ else
     config_summary += {
       'Matrix Library': 'MKL',
     }
+  elif cblas_dep.found()
+    if use_cblas
+      feature_defines += [
+        '-DUSE_CBLAS',
+      ]
+      config_summary += {
+        'Matrix Library': 'CBLAS',
+      }
+    else
+      config_summary += {
+        'Matrix Library': 'None - system CBLAS found but not used unless requested - see meson_options.txt for this and LibTorch or MKL options'
+      }
+    endif      
   else
     config_summary += {
       'Matrix Library': 'None - see meson_options.txt for LibTorch or MKL options'
@@ -221,6 +236,7 @@ plugin_library = shared_library(
   ],
   dependencies: [
     openmp_dep,
+    cblas_dep,
   ],
   include_directories: [
     'ext/vamp-plugin-sdk',

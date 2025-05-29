@@ -8,3 +8,8 @@ option('mkl_path',
        type: 'string',
        value: '',
        description: 'Path to Intel MKL libraries. Leave empty if MKL is not to be used. This is only referred to if libtorch_path is not set and the Accelerate framework is not available.')
+
+option('use_cblas',
+       type: 'boolean',
+       value: false,
+       description: 'Use a system BLAS/CBLAS library (other than MKL or Accelerate) if found. Without this, a system dependency will be ignored, because it is not always faster than the built-in code.')
