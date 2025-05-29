@@ -67,6 +67,9 @@ protected:
     int64_t m_chunkLength;
     
     std::vector<float> m_chunk;
+    std::vector<std::vector<double>> m_totals;
+    int64_t m_count;
+    Vamp::RealTime m_lastTimestamp;
 
     void processChunk(FeatureSet &fs);
 };

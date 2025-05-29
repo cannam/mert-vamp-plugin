@@ -174,18 +174,13 @@ MERTVampPlugin::getOutputDescriptors() const
     d.unit = "";
     d.hasFixedBinCount = true;
     d.binCount = hiddenSize;
-    d.hasKnownExtents = false; // for the conv output only
-    d.isQuantized = false;
+    d.hasKnownExtents = false;
     d.sampleType = OutputDescriptor::FixedSampleRate;
     d.sampleRate = outputSampleRate;
     d.hasDuration = false;
     list.push_back(d);
 
-    d.hasKnownExtents = true;
-    d.minValue = -1.f;
-    d.maxValue = 1.f;
-
-    for (int i = 0; i < 12; ++i) {
+    for (int i = 0; i < nHiddenLayers; ++i) {
         string is = to_string(i + 1);
         string is0 = is;
         if (i + 1 < 10) is0 = "0" + is0;
@@ -195,6 +190,11 @@ MERTVampPlugin::getOutputDescriptors() const
         list.push_back(d);
     }
     
+    d.identifier = "means";
+    d.name = "Mean values";
+    d.description = "Mean values over time of feature bins for each output.";
+    list.push_back(d);
+
     return list;
 }
 
@@ -273,10 +273,15 @@ MERTVampPlugin::reset()
     if (m_chunkLength < unit) m_chunkLength = unit;
     
     m_chunk = {};
+
+    m_totals = vector<vector<double>>(nHiddenLayers + 1,
+                                      vector<double>(hiddenSize, 0.0));
+    m_count = 0;
+    m_lastTimestamp = Vamp::RealTime::zeroTime;
 }
 
 MERTVampPlugin::FeatureSet
-MERTVampPlugin::process(const float *const *inputBuffers, Vamp::RealTime)
+MERTVampPlugin::process(const float *const *inputBuffers, Vamp::RealTime t)
 {
     FeatureSet fs;
     
@@ -303,6 +308,7 @@ MERTVampPlugin::process(const float *const *inputBuffers, Vamp::RealTime)
         processChunk(fs);
     }
     
+    m_lastTimestamp = t;
     return fs;
 }
 
@@ -332,41 +338,48 @@ MERTVampPlugin::processChunk(FeatureSet &fs)
     at::Tensor input = torch::from_blob
         (toProcess.data(), { 1, 1, int64_t(toProcess.size()) }); // no need to clone
     vector<at::Tensor> output = m_mert(input);
-    for (int64_t i = 0; i < int64_t(output.size()); ++i) {
-        at::Tensor t = output[i].to(at::kCPU).contiguous();
+    for (int64_t h = 0; h < int64_t(output.size()); ++h) {
+        at::Tensor t = output[h].to(at::kCPU).contiguous();
         const float *data = t.data_ptr<float>();
         auto sz = t.sizes();
         auto st = t.strides();
-        for (int64_t j = 0; j < sz[0]; ++j) {
-            for (int64_t k = 0; k < sz[1]; ++k) {
-                
+        for (int64_t b = 0; b < sz[0]; ++b) {
+            for (int64_t i = 0; i < sz[1]; ++i) {
                 Feature f;
                 f.hasTimestamp = false;
-                int64_t ix0 = j * st[0] + k * st[1];
-                int64_t ix1 = j * st[0] + (k + 1) * st[1];
+                int64_t ix0 = b * st[0] + i * st[1];
+                int64_t ix1 = b * st[0] + (i + 1) * st[1];
                 f.values = vector<float>(data + ix0, data + ix1);
-                fs[i].push_back(f);
+                for (int j = 0; j < hiddenSize; ++j) {
+                    m_totals[h][j] += f.values[j];
+                }
+                fs[h].push_back(f);
             }
         }
     }
 #else
     Tensor input({ 1, 1, int64_t(toProcess.size()) }, toProcess);
     vector<Tensor> output = m_mert.forward(input);
-    for (int64_t i = 0; i < int64_t(output.size()); ++i) {
-        Tensor &t = output[i];
+    for (int64_t h = 0; h < int64_t(output.size()); ++h) {
+        Tensor &t = output[h];
         const float *data = t.constData();
-        for (int64_t j = 0; j < t.sizes[0]; ++j) {
-            for (int64_t k = 0; k < t.sizes[1]; ++k) {
+        for (int64_t b = 0; b < t.sizes[0]; ++b) {
+            for (int64_t i = 0; i < t.sizes[1]; ++i) {
                 Feature f;
                 f.hasTimestamp = false;
-                int64_t ix0 = t.index(j, k);
-                int64_t ix1 = t.index(j, k + 1);
+                int64_t ix0 = t.index(b, i);
+                int64_t ix1 = t.index(b, i + 1);
                 f.values = vector<float>(data + ix0, data + ix1);
-                fs[i].push_back(f);
+                for (int j = 0; j < hiddenSize; ++j) {
+                    m_totals[h][j] += f.values[j];
+                }
+                fs[h].push_back(f);
             }
         }
     }
 #endif
+
+    m_count += fs[0].size();
 }
 
 MERTVampPlugin::FeatureSet
@@ -379,6 +392,21 @@ MERTVampPlugin::getRemainingFeatures()
     }
     if (m_chunk.size() > 0) {
         processChunk(fs);
+    }
+
+    if (m_count > 0) {
+        for (int64_t h = 0; h < int64_t(m_totals.size()); ++h) {
+            Feature means;
+            means.hasTimestamp = true;
+            means.timestamp = Vamp::RealTime::frame2RealTime
+                (h, outputSampleRate);
+            for (int64_t j = 0; j < hiddenSize; ++j) {
+                means.values.push_back(float(m_totals[h][j] / double(m_count)));
+            }
+            means.label = string("Mean bin values across time for output ") +
+                to_string(h);
+            fs[nHiddenLayers + 1].push_back(means);
+        }
     }
     
     return fs;

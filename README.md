@@ -115,13 +115,23 @@ and the features are stuck together again without modification or
 interpolation afterwards. Discontinuities can therefore occur at chunk
 boundaries - an obvious area for improvement.
 
-The plugin has 13 outputs. All have the same form, a fixed-sample-rate
-(50 features/sec) series of 768-bin features. The first output
-("Convolutional embedding") is the output of the preprocessor as
-supplied to the first attention layer in the model. The remaining
-outputs ("Hidden layer N state" for N in 1-12) are the features
-extracted from the subsequent 12 rounds of attention layers, with
-layer 12 being the final output from the model.
+The plugin has 14 outputs, all returning feature vectors with 768
+values.
+
+The first output ("Convolutional embedding") is the output of the
+convolutional preprocessor as supplied to the first attention layer in
+the model.
+
+The next 12 outputs ("Hidden layer N state" for N in 1-12) are
+features extracted from the subsequent 12 rounds of attention layers,
+with layer 12 being the final output from the model.
+
+Finally there is an output reporting the mean values of each feature
+bin, for each of the other outputs separately, across the whole input
+duration. The features returned by this output (13 of them) are
+timestamped so that a display in Sonic Visualiser or similar will show
+them as a grid with the x-coordinate being output number; the
+timestamps for this output otherwise have no meaning.
 
 ## Credits and copyright
 
