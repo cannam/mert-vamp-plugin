@@ -323,10 +323,14 @@ MERTVampPlugin::processChunk(FeatureSet &fs)
         toProcess = vector<float>(m_chunk.begin(), m_chunk.begin() + length);
         m_chunk = vector<float>(m_chunk.begin() + length, m_chunk.end());
     }
+
+    while (toProcess.size() < 1024) {
+        toProcess.push_back(0.f);
+    }
     
 #ifdef USE_LIBTORCH
     at::Tensor input = torch::from_blob
-        (chunk.data(), { 1, 1, int64_t(toProcess.size()) }); // no need to clone
+        (toProcess.data(), { 1, 1, int64_t(toProcess.size()) }); // no need to clone
     vector<at::Tensor> output = m_mert(input);
     for (int64_t i = 0; i < int64_t(output.size()); ++i) {
         at::Tensor t = output[i].to(at::kCPU).contiguous();
