@@ -202,15 +202,20 @@ bool
 MERTVampPlugin::initialise(size_t channels, size_t stepSize, size_t blockSize)
 {
     if (channels < getMinChannelCount()) {
-        std::cerr << "MERTVampPlugin::initialise: unsupported channel count "
+        std::cerr << "MERTVampPlugin::initialise: ERROR: unsupported channel count "
                   << channels << std::endl;
         return false;
     }
 
     if (blockSize != stepSize) {
-        std::cerr << "MERTVampPlugin::initialise: block size " << blockSize
+        std::cerr << "MERTVampPlugin::initialise: ERROR: block size " << blockSize
                   << " must match step size " << stepSize
                   << std::endl;
+        return false;
+    }
+
+    if (m_inputSampleRate < 400 || m_inputSampleRate > 192000) {
+        std::cerr << "MERTVampPlugin::initialise: ERROR: input sample rate outside supported range (400 - 192000 Hz)" << std::endl;
         return false;
     }
 
@@ -219,7 +224,7 @@ MERTVampPlugin::initialise(size_t channels, size_t stepSize, size_t blockSize)
                   << std::endl;
         return false;
     }
-
+    
     bool firstTime = (m_blockSize == 0);
     
     m_channels = channels;
