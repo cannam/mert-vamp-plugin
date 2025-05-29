@@ -3,7 +3,7 @@ project(
   'MERT Vamp Plugin',
   'cpp',
   # For a Vamp plugin the version must be a single integer
-  version: '1',
+  version: '2',
   license: 'MIT',
   default_options: [
     'cpp_std=c++17',
