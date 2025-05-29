@@ -1,0 +1,192 @@
+@prefix rdfs:     <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd:      <http://www.w3.org/2001/XMLSchema#> .
+@prefix vamp:     <http://purl.org/ontology/vamp/> .
+@prefix plugbase: <http://vamp-plugins.org/rdf/plugins/mert-vamp-plugin#> .
+@prefix owl:      <http://www.w3.org/2002/07/owl#> .
+@prefix dc:       <http://purl.org/dc/elements/1.1/> .
+@prefix af:       <http://purl.org/ontology/af/> .
+@prefix foaf:     <http://xmlns.com/foaf/0.1/> .
+@prefix doap:     <http://usefulinc.com/ns/doap#> .
+@prefix cc:       <http://web.resource.org/cc/> .
+@prefix :         <#> .
+
+
+## Properties of this document
+
+<> a vamp:PluginDescription ;
+    foaf:maker         <http://vamp-plugins.org/rdf/template-generator> ;
+    foaf:primaryTopic  <http://vamp-plugins.org/rdf/plugins/mert-vamp-plugin> .
+
+
+## Maker of the whole plugin library
+
+:library_maker
+    foaf:name "Queen Mary, University of London" ;
+    foaf:logo <http://vamp-plugins.org/rdf/plugins/makers/qm.png> ;
+    foaf:page <http://c4dm.eecs.qmul.ac.uk/> .
+
+
+## Properties of the plugin library, and references to the plugins it contains
+
+plugbase:library a vamp:PluginLibrary ;
+    vamp:identifier        "mert-vamp-plugin" ;
+    foaf:maker             :library_maker ; 
+    vamp:available_plugin  plugbase:mert-vamp-plugin ; 
+    dc:title               "MERT Vamp Plugin" ;
+    dc:description         "Generates features from music audio using the MERT transformer model" ;
+    foaf:page              <https://github.com/cannam/mert-vamp-plugin> ;
+    doap:download-page     <https://github.com/cannam/mert-vamp-plugin/releases> 
+    .
+
+
+## Properties of the MERT Vamp Plugin plugin
+
+plugbase:mert-vamp-plugin a vamp:Plugin ;
+    dc:title              "MERT Vamp Plugin" ;
+    vamp:name             "MERT Vamp Plugin" ;
+    dc:description        """Generates features from music audio using the MERT-v1-95M pretrained transformer model.""" ;
+    foaf:maker            :library_maker ;
+    dc:rights             """Code MIT/X11; trained weights CC-BY-NC 4.0""" ;
+    vamp:identifier       "mert-vamp-plugin" ;
+    vamp:vamp_API_version vamp:api_version_2 ;
+    owl:versionInfo       "2" ;
+    vamp:input_domain     vamp:TimeDomain ;
+    vamp:parameter   plugbase:mert-vamp-plugin_param_chunk ;
+    vamp:output      plugbase:mert-vamp-plugin_output_conv ;
+    vamp:output      plugbase:mert-vamp-plugin_output_layer-01 ;
+    vamp:output      plugbase:mert-vamp-plugin_output_layer-02 ;
+    vamp:output      plugbase:mert-vamp-plugin_output_layer-03 ;
+    vamp:output      plugbase:mert-vamp-plugin_output_layer-04 ;
+    vamp:output      plugbase:mert-vamp-plugin_output_layer-05 ;
+    vamp:output      plugbase:mert-vamp-plugin_output_layer-06 ;
+    vamp:output      plugbase:mert-vamp-plugin_output_layer-07 ;
+    vamp:output      plugbase:mert-vamp-plugin_output_layer-08 ;
+    vamp:output      plugbase:mert-vamp-plugin_output_layer-09 ;
+    vamp:output      plugbase:mert-vamp-plugin_output_layer-10 ;
+    vamp:output      plugbase:mert-vamp-plugin_output_layer-11 ;
+    vamp:output      plugbase:mert-vamp-plugin_output_layer-12 ;
+    vamp:output      plugbase:mert-vamp-plugin_output_means ;
+    .
+plugbase:mert-vamp-plugin_param_chunk a  vamp:Parameter ;
+    vamp:identifier     "chunk" ;
+    dc:title            "Chunk duration" ;
+    dc:format           "s" ;
+    vamp:min_value       1 ;
+    vamp:max_value       60 ;
+    vamp:unit           "s"  ;
+    vamp:default_value   5 ;
+    vamp:value_names     ();
+    .
+plugbase:mert-vamp-plugin_output_conv a  vamp:DenseOutput ;
+    vamp:identifier       "conv" ;
+    dc:title              "Convolutional embedding" ;
+    dc:description        """Output from the convolutional preprocessor and positional embedding, as provided to the transformer as input."""  ;
+    vamp:fixed_bin_count  "true" ;
+    vamp:unit             "" ;
+    vamp:bin_count        768 ;
+    .
+plugbase:mert-vamp-plugin_output_layer-01 a  vamp:DenseOutput ;
+    vamp:identifier       "layer-01" ;
+    dc:title              "Hidden layer 01 state" ;
+    dc:description        """Output from transformer layer 1."""  ;
+    vamp:fixed_bin_count  "true" ;
+    vamp:unit             "" ;
+    vamp:bin_count        768 ;
+    .
+plugbase:mert-vamp-plugin_output_layer-02 a  vamp:DenseOutput ;
+    vamp:identifier       "layer-02" ;
+    dc:title              "Hidden layer 02 state" ;
+    dc:description        """Output from transformer layer 2."""  ;
+    vamp:fixed_bin_count  "true" ;
+    vamp:unit             "" ;
+    vamp:bin_count        768 ;
+    .
+plugbase:mert-vamp-plugin_output_layer-03 a  vamp:DenseOutput ;
+    vamp:identifier       "layer-03" ;
+    dc:title              "Hidden layer 03 state" ;
+    dc:description        """Output from transformer layer 3."""  ;
+    vamp:fixed_bin_count  "true" ;
+    vamp:unit             "" ;
+    vamp:bin_count        768 ;
+    .
+plugbase:mert-vamp-plugin_output_layer-04 a  vamp:DenseOutput ;
+    vamp:identifier       "layer-04" ;
+    dc:title              "Hidden layer 04 state" ;
+    dc:description        """Output from transformer layer 4."""  ;
+    vamp:fixed_bin_count  "true" ;
+    vamp:unit             "" ;
+    vamp:bin_count        768 ;
+    .
+plugbase:mert-vamp-plugin_output_layer-05 a  vamp:DenseOutput ;
+    vamp:identifier       "layer-05" ;
+    dc:title              "Hidden layer 05 state" ;
+    dc:description        """Output from transformer layer 5."""  ;
+    vamp:fixed_bin_count  "true" ;
+    vamp:unit             "" ;
+    vamp:bin_count        768 ;
+    .
+plugbase:mert-vamp-plugin_output_layer-06 a  vamp:DenseOutput ;
+    vamp:identifier       "layer-06" ;
+    dc:title              "Hidden layer 06 state" ;
+    dc:description        """Output from transformer layer 6."""  ;
+    vamp:fixed_bin_count  "true" ;
+    vamp:unit             "" ;
+    vamp:bin_count        768 ;
+    .
+plugbase:mert-vamp-plugin_output_layer-07 a  vamp:DenseOutput ;
+    vamp:identifier       "layer-07" ;
+    dc:title              "Hidden layer 07 state" ;
+    dc:description        """Output from transformer layer 7."""  ;
+    vamp:fixed_bin_count  "true" ;
+    vamp:unit             "" ;
+    vamp:bin_count        768 ;
+    .
+plugbase:mert-vamp-plugin_output_layer-08 a  vamp:DenseOutput ;
+    vamp:identifier       "layer-08" ;
+    dc:title              "Hidden layer 08 state" ;
+    dc:description        """Output from transformer layer 8."""  ;
+    vamp:fixed_bin_count  "true" ;
+    vamp:unit             "" ;
+    vamp:bin_count        768 ;
+    .
+plugbase:mert-vamp-plugin_output_layer-09 a  vamp:DenseOutput ;
+    vamp:identifier       "layer-09" ;
+    dc:title              "Hidden layer 09 state" ;
+    dc:description        """Output from transformer layer 9."""  ;
+    vamp:fixed_bin_count  "true" ;
+    vamp:unit             "" ;
+    vamp:bin_count        768 ;
+    .
+plugbase:mert-vamp-plugin_output_layer-10 a  vamp:DenseOutput ;
+    vamp:identifier       "layer-10" ;
+    dc:title              "Hidden layer 10 state" ;
+    dc:description        """Output from transformer layer 10."""  ;
+    vamp:fixed_bin_count  "true" ;
+    vamp:unit             "" ;
+    vamp:bin_count        768 ;
+    .
+plugbase:mert-vamp-plugin_output_layer-11 a  vamp:DenseOutput ;
+    vamp:identifier       "layer-11" ;
+    dc:title              "Hidden layer 11 state" ;
+    dc:description        """Output from transformer layer 11."""  ;
+    vamp:fixed_bin_count  "true" ;
+    vamp:unit             "" ;
+    vamp:bin_count        768 ;
+    .
+plugbase:mert-vamp-plugin_output_layer-12 a  vamp:DenseOutput ;
+    vamp:identifier       "layer-12" ;
+    dc:title              "Hidden layer 12 state" ;
+    dc:description        """Output from transformer layer 12."""  ;
+    vamp:fixed_bin_count  "true" ;
+    vamp:unit             "" ;
+    vamp:bin_count        768 ;
+    .
+plugbase:mert-vamp-plugin_output_means a  vamp:DenseOutput ;
+    vamp:identifier       "means" ;
+    dc:title              "Mean values" ;
+    dc:description        """Mean values over time of feature bins for each output."""  ;
+    vamp:fixed_bin_count  "true" ;
+    vamp:unit             "" ;
+    vamp:bin_count        768 ;
+    .
+
